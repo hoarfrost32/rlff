@@ -1,58 +1,123 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Search,
-  MapPin,
   Calendar,
-  Video,
-  Star,
   Image as ImageIcon,
+  MapPin,
+  Search,
+  Star,
+  Video,
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
-import { daysMap, venuesList, rawScheduleData } from "./scheduleDb";
+import { daysMap, rawScheduleData, venuesList } from "./scheduleDb";
 import {
-  fetchPosterUrl,
-  getCachedPosterUrl,
   fetchMovieOverview,
+  fetchPosterUrl,
   getCachedMovieOverview,
+  getCachedPosterUrl,
 } from "./tmdbApi";
+
+const DAYS = [1, 2, 3];
+const OVERVIEW_CLAMP_STYLE = {
+  display: "-webkit-box",
+  WebkitLineClamp: 3,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+};
+const DAY_BTN =
+  "px-5 py-2 rounded-full text-sm font-semibold transition-colors";
+const CARD_BASE = "p-4 rounded-xl border transition-all flex flex-col h-full";
+const TMDB_FETCH_DELAY_BASE_MS = 40;
+const TMDB_FETCH_DELAY_JITTER_MS = 120;
+const makeDayGroups = () => ({ 1: [], 2: [], 3: [] });
+const groupByDay = (items) =>
+  items.reduce(
+    (groups, item) => ((groups[item.dayId] ??= []).push(item), groups),
+    makeDayGroups(),
+  );
+const getTmdbFetchDelay = () =>
+  TMDB_FETCH_DELAY_BASE_MS + Math.random() * TMDB_FETCH_DELAY_JITTER_MS;
+const parseDurationMinutes = (details) => {
+  const minutes = Number(details?.match(/(\d+)\s*min/i)?.[1]);
+  return Number.isFinite(minutes) ? minutes : 120;
+};
+const isTbcTitle = (title) =>
+  title === "TBC" || title.includes("To Be Announced");
+const isOverlapping = (a, b) =>
+  a.dayId === b.dayId &&
+  a.startMinutes < b.endMinutes &&
+  b.startMinutes < a.endMinutes;
+const ordinalSuffix = (day) =>
+  day >= 11 && day <= 13
+    ? "th"
+    : day % 10 === 1
+      ? "st"
+      : day % 10 === 2
+        ? "nd"
+        : day % 10 === 3
+          ? "rd"
+          : "th";
+const cardClass = (isSelected, isTBC, isDarkened) =>
+  `${CARD_BASE} ${isSelected ? "bg-red-50 border-red-400 ring-2 ring-red-300 shadow-md cursor-pointer" : isTBC ? "bg-gray-50 border-gray-200 cursor-default" : "bg-white border-gray-200 shadow-sm hover:shadow-md cursor-pointer"} ${isDarkened ? "opacity-35 grayscale" : ""}`;
+
+const parseTime = (timeStr) => {
+  if (!timeStr) return 0;
+  const [time, period] = timeStr.split(" ");
+  if (!time || !period) return 0;
+  let [hours, minutes] = time.split(":").map(Number);
+  if (period === "PM" && hours !== 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+};
+
+const formatTimeLower = (totalMinutes) => {
+  const minutesInDay = 24 * 60;
+  const normalized =
+    ((totalMinutes % minutesInDay) + minutesInDay) % minutesInDay;
+  let hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  const period = hours >= 12 ? "pm" : "am";
+  hours = hours % 12 || 12;
+  return `${hours}:${String(minutes).padStart(2, "0")}${period}`;
+};
+
+const formatTimelineDayLabel = (dayLabel) => {
+  const [weekday, dateText] = dayLabel.split(",").map((part) => part.trim());
+  if (!weekday || !dateText) return dayLabel;
+  const [dayNumberText, ...monthParts] = dateText.split(" ");
+  const dayNumber = Number(dayNumberText);
+  const month = monthParts.join(" ");
+  return Number.isFinite(dayNumber) && month
+    ? `${dayNumber}${ordinalSuffix(dayNumber)} ${month}, ${weekday}`
+    : dayLabel;
+};
 
 const MoviePoster = ({ title, details, isTBC }) => {
   const [posterUrl, setPosterUrl] = useState(
-    getCachedPosterUrl(title, details) || null,
+    () => getCachedPosterUrl(title, details) || null,
   );
   const [loading, setLoading] = useState(
-    !getCachedPosterUrl(title, details) && !isTBC,
+    () => !getCachedPosterUrl(title, details) && !isTBC,
   );
   const [isInView, setIsInView] = useState(false);
   const containerRef = useRef(null);
 
-  // Use an IntersectionObserver to implement lazy-loading
   useEffect(() => {
-    if (isTBC || getCachedPosterUrl(title, details)) {
-      setIsInView(true);
-      return;
-    }
-
+    if (isTBC || getCachedPosterUrl(title, details))
+      return void setIsInView(true);
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsInView(true);
-          observer.disconnect();
-        }
+        if (!entry.isIntersecting) return;
+        setIsInView(true);
+        observer.disconnect();
       },
       { rootMargin: "150px" },
     );
-
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
-
+    if (containerRef.current) observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, [title, details, isTBC]);
 
   useEffect(() => {
-    // Wait until the item is visible on screen before making network requests
     const cachedPoster = getCachedPosterUrl(title, details);
     if (!isInView || isTBC || cachedPoster) {
       if (cachedPoster) {
@@ -63,19 +128,14 @@ const MoviePoster = ({ title, details, isTBC }) => {
     }
 
     let isMounted = true;
-
-    const fetchPoster = async () => {
+    const timer = setTimeout(async () => {
       try {
         const url = await fetchPosterUrl({ title, details });
-        if (!isMounted) return;
-        setPosterUrl(url);
+        if (isMounted) setPosterUrl(url);
       } finally {
         if (isMounted) setLoading(false);
       }
-    };
-
-    // Stagger remaining requests mildly to avoid hammering the API
-    const timer = setTimeout(fetchPoster, 200 + Math.random() * 600);
+    }, getTmdbFetchDelay());
 
     return () => {
       isMounted = false;
@@ -84,7 +144,6 @@ const MoviePoster = ({ title, details, isTBC }) => {
   }, [title, details, isTBC, isInView]);
 
   if (isTBC) return null;
-
   return (
     <div
       ref={containerRef}
@@ -107,15 +166,14 @@ const MoviePoster = ({ title, details, isTBC }) => {
 
 const MovieOverview = ({ title, details, isTBC, showFullDescription }) => {
   const [overview, setOverview] = useState(
-    getCachedMovieOverview(title, details) || null,
+    () => getCachedMovieOverview(title, details) || null,
   );
   const [loading, setLoading] = useState(
-    !getCachedMovieOverview(title, details) && !isTBC,
+    () => !getCachedMovieOverview(title, details) && !isTBC,
   );
 
   useEffect(() => {
     if (isTBC) return;
-
     const cachedOverview = getCachedMovieOverview(title, details);
     if (cachedOverview) {
       setOverview(cachedOverview);
@@ -124,18 +182,14 @@ const MovieOverview = ({ title, details, isTBC, showFullDescription }) => {
     }
 
     let isMounted = true;
-    const timer = setTimeout(
-      async () => {
-        try {
-          const value = await fetchMovieOverview({ title, details });
-          if (!isMounted) return;
-          setOverview(value);
-        } finally {
-          if (isMounted) setLoading(false);
-        }
-      },
-      250 + Math.random() * 550,
-    );
+    const timer = setTimeout(async () => {
+      try {
+        const value = await fetchMovieOverview({ title, details });
+        if (isMounted) setOverview(value);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }, getTmdbFetchDelay());
 
     return () => {
       isMounted = false;
@@ -144,24 +198,16 @@ const MovieOverview = ({ title, details, isTBC, showFullDescription }) => {
   }, [title, details, isTBC]);
 
   if (isTBC || loading || !overview || overview === "not_found") return null;
-
   return (
     <div className="relative">
       <p
         className="text-xs text-gray-500 leading-snug"
-        style={{
-          display: "-webkit-box",
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: "vertical",
-          overflow: "hidden",
-        }}
+        style={OVERVIEW_CLAMP_STYLE}
       >
         {overview}
       </p>
       <div
-        className={`pointer-events-none absolute left-0 right-0 z-20 mt-1 rounded-md border border-gray-200 bg-white p-2 text-xs text-gray-700 shadow-lg transition-opacity duration-150 ${
-          showFullDescription ? "opacity-100" : "opacity-0"
-        }`}
+        className={`pointer-events-none absolute left-0 right-0 z-20 mt-1 rounded-md border border-gray-200 bg-white p-2 text-xs text-gray-700 shadow-lg transition-opacity duration-150 ${showFullDescription ? "opacity-100" : "opacity-0"}`}
       >
         {overview}
       </div>
@@ -169,63 +215,105 @@ const MovieOverview = ({ title, details, isTBC, showFullDescription }) => {
   );
 };
 
-// Helper to sort by time properly
-const parseTime = (timeStr) => {
-  if (!timeStr) return 0;
-  const [time, period] = timeStr.split(" ");
-  if (!time || !period) return 0;
-  let [hours, minutes] = time.split(":").map(Number);
-  if (period === "PM" && hours !== 12) hours += 12;
-  if (period === "AM" && hours === 12) hours = 0;
-  return hours * 60 + minutes;
-};
+const TimelineDay = ({ day, items }) => (
+  <div>
+    <h3 className="text-sm font-bold text-gray-800 mb-3">
+      {formatTimelineDayLabel(daysMap[day])}
+    </h3>
+    <div className="space-y-3">
+      {items.map((item) => (
+        <div key={item.id} className="flex gap-3">
+          <div className="flex flex-col items-center">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 mt-1" />
+            <span className="w-px flex-1 bg-red-200 mt-1" />
+          </div>
+          <div className="min-w-0 pb-2">
+            <p className="text-xs font-semibold text-red-700">{`${formatTimeLower(item.startMinutes)} - ${formatTimeLower(item.endMinutes)}`}</p>
+            <p className="text-sm font-semibold text-gray-900 leading-tight">
+              {item.title}
+            </p>
+            <p className="text-xs text-gray-600 mt-0.5">
+              {item.venue} • Screen {item.screen}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
-const parseDurationMinutes = (details) => {
-  const match = details?.match(/(\d+)\s*min/i);
-  if (!match) return 120;
-  const minutes = Number(match[1]);
-  return Number.isFinite(minutes) ? minutes : 120;
-};
-
-const formatTimeLower = (totalMinutes) => {
-  const minutesInDay = 24 * 60;
-  const normalized =
-    ((totalMinutes % minutesInDay) + minutesInDay) % minutesInDay;
-  let hours = Math.floor(normalized / 60);
-  const minutes = normalized % 60;
-  const period = hours >= 12 ? "pm" : "am";
-  hours = hours % 12 || 12;
-  return `${hours}:${String(minutes).padStart(2, "0")}${period}`;
-};
-
-const isTbcTitle = (title) =>
-  title === "TBC" || title.includes("To Be Announced");
-
-const isOverlapping = (a, b) =>
-  a.dayId === b.dayId &&
-  a.startMinutes < b.endMinutes &&
-  b.startMinutes < a.endMinutes;
-
-const ordinalSuffix = (day) => {
-  if (day >= 11 && day <= 13) return "th";
-  const lastDigit = day % 10;
-  if (lastDigit === 1) return "st";
-  if (lastDigit === 2) return "nd";
-  if (lastDigit === 3) return "rd";
-  return "th";
-};
-
-const formatTimelineDayLabel = (dayLabel) => {
-  const [weekday, dateText] = dayLabel.split(",").map((part) => part.trim());
-  if (!weekday || !dateText) return dayLabel;
-
-  const [dayNumberText, ...monthParts] = dateText.split(" ");
-  const dayNumber = Number(dayNumberText);
-  const month = monthParts.join(" ");
-
-  if (!Number.isFinite(dayNumber) || !month) return dayLabel;
-
-  return `${dayNumber}${ordinalSuffix(dayNumber)} ${month}, ${weekday}`;
+const ScreeningCard = ({
+  item,
+  isSelected,
+  isConflicting,
+  onToggleSelection,
+  onMouseEnter,
+  onMouseLeave,
+  showFullDescription,
+}) => {
+  const { id, venue, screen, time, title, details, isTBC } = item;
+  const isDarkened = !isSelected && isConflicting;
+  const hasMeet = details.toLowerCase().includes("meet");
+  return (
+    <div
+      role="button"
+      tabIndex={isTBC ? -1 : 0}
+      onClick={() => onToggleSelection(item)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onToggleSelection(item);
+      }}
+      onMouseEnter={() => onMouseEnter(id)}
+      onMouseLeave={() => onMouseLeave(id)}
+      className={cardClass(isSelected, isTBC, isDarkened)}
+    >
+      <div className="flex gap-4 mb-3">
+        <MoviePoster title={title} details={details} isTBC={isTBC} />
+        <div className="flex-1 min-w-0">
+          <h3
+            className={`font-bold text-lg leading-tight break-words mb-2 ${isTBC ? "text-gray-500 italic" : "text-gray-900"}`}
+          >
+            {title}
+          </h3>
+          {isSelected && (
+            <span className="inline-flex items-center mb-2 text-[11px] font-bold text-red-700 bg-red-100 border border-red-200 rounded px-2 py-0.5">
+              Selected
+            </span>
+          )}
+          {details && (
+            <p className="text-sm text-gray-600 mb-2 leading-snug">
+              {hasMeet ? (
+                <span className="flex items-start gap-1">
+                  <Star
+                    className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"
+                    fill="currentColor"
+                  />
+                  <span className="font-medium text-gray-800">{details}</span>
+                </span>
+              ) : (
+                details
+              )}
+            </p>
+          )}
+          <MovieOverview
+            title={title}
+            details={details}
+            isTBC={isTBC}
+            showFullDescription={showFullDescription}
+          />
+        </div>
+      </div>
+      <div className="flex items-center text-xs font-medium text-gray-500 mt-auto pt-3 border-t border-gray-100 gap-1.5">
+        <MapPin className="w-3.5 h-3.5 text-gray-400" />
+        <span className="truncate">{venue}</span>
+        <span className="text-gray-300">•</span>
+        <span>Screen {screen}</span>
+        <span className="text-gray-300">•</span>
+        <span>{time}</span>
+      </div>
+    </div>
+  );
 };
 
 export default function App() {
@@ -235,55 +323,35 @@ export default function App() {
   const [selectedMovieIds, setSelectedMovieIds] = useState([]);
   const [hoveredDescriptionCardId, setHoveredDescriptionCardId] =
     useState(null);
+  const [isExporting, setIsExporting] = useState(false);
   const hoverDelayTimerRef = useRef(null);
   const timelineRef = useRef(null);
-  const [isExporting, setIsExporting] = useState(false);
 
   const allScheduleItems = useMemo(
     () =>
-      rawScheduleData.map((item, id) => {
-        const [dayId, venue, screen, time, title, details] = item;
-        const startMinutes = parseTime(time);
-        const durationMinutes = parseDurationMinutes(details);
-        return {
-          id,
-          dayId,
-          venue,
-          screen,
-          time,
-          title,
-          details,
-          startMinutes,
-          endMinutes: startMinutes + durationMinutes,
-          isTBC: isTbcTitle(title),
-        };
-      }),
+      rawScheduleData.map(
+        ([dayId, venue, screen, time, title, details], id) => {
+          const startMinutes = parseTime(time);
+          return {
+            id,
+            dayId,
+            venue,
+            screen,
+            time,
+            title,
+            details,
+            startMinutes,
+            endMinutes: startMinutes + parseDurationMinutes(details),
+            isTBC: isTbcTitle(title),
+          };
+        },
+      ),
     [],
   );
-
   const selectedIdSet = useMemo(
     () => new Set(selectedMovieIds),
     [selectedMovieIds],
   );
-
-  const conflictingMovieIds = useMemo(() => {
-    const conflicts = new Set();
-    if (selectedMovieIds.length === 0) return conflicts;
-
-    const selectedItems = allScheduleItems.filter((item) =>
-      selectedIdSet.has(item.id),
-    );
-
-    allScheduleItems.forEach((item) => {
-      if (selectedIdSet.has(item.id) || item.isTBC) return;
-      if (selectedItems.some((selected) => isOverlapping(item, selected))) {
-        conflicts.add(item.id);
-      }
-    });
-
-    return conflicts;
-  }, [allScheduleItems, selectedIdSet, selectedMovieIds.length]);
-
   const selectedScheduleItems = useMemo(
     () =>
       allScheduleItems
@@ -291,39 +359,58 @@ export default function App() {
         .sort((a, b) => a.dayId - b.dayId || a.startMinutes - b.startMinutes),
     [allScheduleItems, selectedIdSet],
   );
+  const selectedScheduleByDay = useMemo(
+    () => groupByDay(selectedScheduleItems),
+    [selectedScheduleItems],
+  );
 
-  const selectedScheduleByDay = useMemo(() => {
-    const groups = { 1: [], 2: [], 3: [] };
-    selectedScheduleItems.forEach((item) => {
-      groups[item.dayId].push(item);
-    });
-    return groups;
-  }, [selectedScheduleItems]);
+  const conflictingMovieIds = useMemo(() => {
+    const conflicts = new Set();
+    if (!selectedScheduleItems.length) return conflicts;
+    for (const item of allScheduleItems) {
+      if (selectedIdSet.has(item.id) || item.isTBC) continue;
+      if (
+        selectedScheduleItems.some((selected) => isOverlapping(item, selected))
+      )
+        conflicts.add(item.id);
+    }
+    return conflicts;
+  }, [allScheduleItems, selectedIdSet, selectedScheduleItems]);
+
+  const filteredAndSortedData = useMemo(() => {
+    const searchLower = searchQuery.toLowerCase();
+    return allScheduleItems
+      .filter(
+        ({ dayId, venue, title, details }) =>
+          (selectedDay === "All" || Number(selectedDay) === dayId) &&
+          (selectedVenue === "All" || venue === selectedVenue) &&
+          (title.toLowerCase().includes(searchLower) ||
+            details.toLowerCase().includes(searchLower)),
+      )
+      .sort((a, b) => a.startMinutes - b.startMinutes);
+  }, [allScheduleItems, selectedDay, selectedVenue, searchQuery]);
+  const groupedByDay = useMemo(
+    () => groupByDay(filteredAndSortedData),
+    [filteredAndSortedData],
+  );
 
   const handleToggleSelection = (item) => {
     if (item.isTBC) return;
-
-    setSelectedMovieIds((prev) => {
-      const isSelected = prev.includes(item.id);
-      if (isSelected) {
-        return prev.filter((id) => id !== item.id);
-      }
-      if (conflictingMovieIds.has(item.id)) {
-        return prev;
-      }
-      return [...prev, item.id];
-    });
+    setSelectedMovieIds((prev) =>
+      prev.includes(item.id)
+        ? prev.filter((id) => id !== item.id)
+        : conflictingMovieIds.has(item.id)
+          ? prev
+          : [...prev, item.id],
+    );
   };
-
   const handleCardMouseEnter = (cardId) => {
-    if (hoverDelayTimerRef.current) {
-      clearTimeout(hoverDelayTimerRef.current);
-    }
-    hoverDelayTimerRef.current = setTimeout(() => {
-      setHoveredDescriptionCardId(cardId);
-    }, 1000);
+    if (hoverDelayTimerRef.current) clearTimeout(hoverDelayTimerRef.current);
+    hoverDelayTimerRef.current = setTimeout(
+      () => setHoveredDescriptionCardId(cardId),
+      1000,
+    );
   };
-
   const handleCardMouseLeave = (cardId) => {
     if (hoverDelayTimerRef.current) {
       clearTimeout(hoverDelayTimerRef.current);
@@ -334,21 +421,17 @@ export default function App() {
 
   const captureTimelineCanvas = async () => {
     if (!timelineRef.current) return null;
-
     setIsExporting(true);
     try {
       return await html2canvas(timelineRef.current, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
-        onclone: (clonedDocument) => {
-          const scrollContainer = clonedDocument.querySelector(
-            "[data-timeline-scroll]",
-          );
-          if (scrollContainer) {
-            scrollContainer.style.maxHeight = "none";
-            scrollContainer.style.overflow = "visible";
-          }
+        onclone: (doc) => {
+          const scrollContainer = doc.querySelector("[data-timeline-scroll]");
+          if (!scrollContainer) return;
+          scrollContainer.style.maxHeight = "none";
+          scrollContainer.style.overflow = "visible";
         },
       });
     } catch (error) {
@@ -362,7 +445,6 @@ export default function App() {
   const downloadTimelineImage = async () => {
     const canvas = await captureTimelineCanvas();
     if (!canvas) return;
-
     const link = document.createElement("a");
     link.href = canvas.toDataURL("image/png");
     link.download = "rlff-timeline.png";
@@ -372,13 +454,11 @@ export default function App() {
   const downloadTimelinePdf = async () => {
     const canvas = await captureTimelineCanvas();
     if (!canvas) return;
-
     const pdf = new jsPDF({
       orientation: canvas.width > canvas.height ? "landscape" : "portrait",
       unit: "px",
       format: [canvas.width, canvas.height],
     });
-
     pdf.addImage(
       canvas.toDataURL("image/png"),
       "PNG",
@@ -391,45 +471,13 @@ export default function App() {
   };
 
   useEffect(
-    () => () => {
-      if (hoverDelayTimerRef.current) {
-        clearTimeout(hoverDelayTimerRef.current);
-      }
-    },
+    () => () =>
+      hoverDelayTimerRef.current && clearTimeout(hoverDelayTimerRef.current),
     [],
   );
 
-  const filteredAndSortedData = useMemo(() => {
-    let filtered = allScheduleItems.filter((item) => {
-      const { dayId, venue, title, details } = item;
-
-      const matchesDay =
-        selectedDay === "All" || parseInt(selectedDay) === dayId;
-      const matchesVenue = selectedVenue === "All" || venue === selectedVenue;
-
-      const searchLower = searchQuery.toLowerCase();
-      const matchesSearch =
-        title.toLowerCase().includes(searchLower) ||
-        details.toLowerCase().includes(searchLower);
-
-      return matchesDay && matchesVenue && matchesSearch;
-    });
-
-    filtered.sort((a, b) => a.startMinutes - b.startMinutes);
-    return filtered;
-  }, [allScheduleItems, selectedDay, selectedVenue, searchQuery]);
-
-  const groupedByDay = useMemo(() => {
-    const groups = { 1: [], 2: [], 3: [] };
-    filteredAndSortedData.forEach((item) => {
-      groups[item.dayId].push(item);
-    });
-    return groups;
-  }, [filteredAndSortedData]);
-
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-12">
-      {/* Header */}
       <header className="bg-red-700 text-white shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-2 sm:px-3 py-4 sm:py-6">
           <div className="flex items-center gap-3 mb-4">
@@ -438,9 +486,7 @@ export default function App() {
               RLFF Schedule
             </h1>
           </div>
-
           <div className="flex flex-col sm:flex-row gap-4">
-            {/* Search */}
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
@@ -451,8 +497,6 @@ export default function App() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-
-            {/* Venue Filter */}
             <div className="relative sm:w-64">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
               <select
@@ -461,9 +505,9 @@ export default function App() {
                 onChange={(e) => setSelectedVenue(e.target.value)}
               >
                 <option value="All">All Venues</option>
-                {venuesList.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
+                {venuesList.map((venue) => (
+                  <option key={venue} value={venue}>
+                    {venue}
                   </option>
                 ))}
               </select>
@@ -474,28 +518,28 @@ export default function App() {
 
       <main className="max-w-[1400px] mx-auto px-2 sm:px-3 mt-6 sm:mt-8">
         <div
-          className={`grid gap-6 ${selectedScheduleItems.length > 0 ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}
+          className={`grid gap-6 ${selectedScheduleItems.length ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "grid-cols-1"}`}
         >
           <section className="min-w-0">
-            {/* Day Toggles */}
             <div className="flex flex-wrap gap-2 mb-8">
               <button
                 onClick={() => setSelectedDay("All")}
-                className={`px-5 py-2 rounded-full text-sm font-semibold transition-colors ${selectedDay === "All" ? "bg-red-600 text-white shadow" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                className={`${DAY_BTN} ${selectedDay === "All" ? "bg-red-600 text-white shadow" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
               >
                 All Days
               </button>
-              {[1, 2, 3].map((day) => (
+              {DAYS.map((day) => (
                 <button
                   key={day}
                   onClick={() => setSelectedDay(day)}
-                  className={`px-5 py-2 rounded-full text-sm font-semibold transition-colors flex items-center gap-2 ${selectedDay === day ? "bg-red-600 text-white shadow" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                  className={`${DAY_BTN} flex items-center gap-2 ${selectedDay === day ? "bg-red-600 text-white shadow" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
                 >
                   <Calendar className="w-4 h-4" />
                   {daysMap[day].split(",")[0]}
                 </button>
               ))}
             </div>
+
             <div className="mb-6 p-3 rounded-xl border border-gray-200 bg-white flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-gray-700">
                 Selected films:{" "}
@@ -503,20 +547,17 @@ export default function App() {
                   {selectedScheduleItems.length}
                 </span>
               </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedMovieIds([])}
-                  disabled={selectedScheduleItems.length === 0}
-                  className="px-3 py-1.5 rounded-md text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Clear
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedMovieIds([])}
+                disabled={!selectedScheduleItems.length}
+                className="px-3 py-1.5 rounded-md text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Clear
+              </button>
             </div>
 
-            {/* Results */}
-            {filteredAndSortedData.length === 0 ? (
+            {!filteredAndSortedData.length ? (
               <div className="text-center py-20 bg-white rounded-xl shadow-sm border border-gray-200">
                 <Video className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h2 className="text-xl font-semibold text-gray-600">
@@ -528,9 +569,9 @@ export default function App() {
               </div>
             ) : (
               <div className="space-y-10">
-                {[1, 2, 3].map((day) => {
-                  if (groupedByDay[day].length === 0) return null;
-
+                {DAYS.map((day) => {
+                  const items = groupedByDay[day];
+                  if (!items.length) return null;
                   return (
                     <div key={day} className="space-y-4">
                       {selectedDay === "All" && (
@@ -538,112 +579,21 @@ export default function App() {
                           <Calendar className="text-red-600" /> {daysMap[day]}
                         </h2>
                       )}
-
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {groupedByDay[day].map((item) => {
-                          const {
-                            id,
-                            venue,
-                            screen,
-                            time,
-                            title,
-                            details,
-                            isTBC,
-                          } = item;
-                          const hasMeet = details
-                            .toLowerCase()
-                            .includes("meet");
-                          const isSelected = selectedIdSet.has(id);
-                          const isConflicting = conflictingMovieIds.has(id);
-                          const isDarkened = !isSelected && isConflicting;
-
-                          return (
-                            <div
-                              key={id}
-                              role="button"
-                              tabIndex={isTBC ? -1 : 0}
-                              onClick={() => handleToggleSelection(item)}
-                              onKeyDown={(event) => {
-                                if (
-                                  event.key === "Enter" ||
-                                  event.key === " "
-                                ) {
-                                  event.preventDefault();
-                                  handleToggleSelection(item);
-                                }
-                              }}
-                              onMouseEnter={() => handleCardMouseEnter(id)}
-                              onMouseLeave={() => handleCardMouseLeave(id)}
-                              className={`p-4 rounded-xl border transition-all flex flex-col h-full ${
-                                isSelected
-                                  ? "bg-red-50 border-red-400 ring-2 ring-red-300 shadow-md cursor-pointer"
-                                  : isTBC
-                                    ? "bg-gray-50 border-gray-200 cursor-default"
-                                    : "bg-white border-gray-200 shadow-sm hover:shadow-md cursor-pointer"
-                              } ${isDarkened ? "opacity-35 grayscale" : ""}`}
-                            >
-                              <div className="flex gap-4 mb-3">
-                                <MoviePoster
-                                  title={title}
-                                  details={details}
-                                  isTBC={isTBC}
-                                />
-
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
-                                    <h3
-                                      className={`font-bold text-lg leading-tight break-words ${isTBC ? "text-gray-500 italic" : "text-gray-900"}`}
-                                    >
-                                      {title}
-                                    </h3>
-                                  </div>
-                                  {isSelected && (
-                                    <span className="inline-flex items-center mb-2 text-[11px] font-bold text-red-700 bg-red-100 border border-red-200 rounded px-2 py-0.5">
-                                      Selected
-                                    </span>
-                                  )}
-
-                                  <div className="flex-1">
-                                    {details && (
-                                      <p className="text-sm text-gray-600 mb-2 leading-snug">
-                                        {hasMeet ? (
-                                          <span className="flex items-start gap-1">
-                                            <Star
-                                              className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"
-                                              fill="currentColor"
-                                            />
-                                            <span className="font-medium text-gray-800">
-                                              {details}
-                                            </span>
-                                          </span>
-                                        ) : (
-                                          details
-                                        )}
-                                      </p>
-                                    )}
-                                    <MovieOverview
-                                      title={title}
-                                      details={details}
-                                      isTBC={isTBC}
-                                      showFullDescription={
-                                        hoveredDescriptionCardId === id
-                                      }
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center text-xs font-medium text-gray-500 mt-auto pt-3 border-t border-gray-100 gap-1.5">
-                                <MapPin className="w-3.5 h-3.5 text-gray-400" />
-                                <span className="truncate">{venue}</span>
-                                <span className="text-gray-300">•</span>
-                                <span>Screen {screen}</span>
-                                <span className="text-gray-300">•</span>
-                                <span>{time}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {items.map((item) => (
+                          <ScreeningCard
+                            key={item.id}
+                            item={item}
+                            isSelected={selectedIdSet.has(item.id)}
+                            isConflicting={conflictingMovieIds.has(item.id)}
+                            onToggleSelection={handleToggleSelection}
+                            onMouseEnter={handleCardMouseEnter}
+                            onMouseLeave={handleCardMouseLeave}
+                            showFullDescription={
+                              hoveredDescriptionCardId === item.id
+                            }
+                          />
+                        ))}
                       </div>
                     </div>
                   );
@@ -683,43 +633,15 @@ export default function App() {
                   </button>
                 </div>
               </div>
-
               <div
                 data-timeline-scroll
                 className="space-y-6 max-h-[75vh] overflow-auto"
               >
-                {[1, 2, 3].map((day) => {
-                  const dayItems = selectedScheduleByDay[day];
-                  if (!dayItems || dayItems.length === 0) return null;
-
-                  return (
-                    <div key={day}>
-                      <h3 className="text-sm font-bold text-gray-800 mb-3">
-                        {formatTimelineDayLabel(daysMap[day])}
-                      </h3>
-                      <div className="space-y-3">
-                        {dayItems.map((item) => (
-                          <div key={item.id} className="flex gap-3">
-                            <div className="flex flex-col items-center">
-                              <span className="w-2.5 h-2.5 rounded-full bg-red-500 mt-1" />
-                              <span className="w-px flex-1 bg-red-200 mt-1" />
-                            </div>
-                            <div className="min-w-0 pb-2">
-                              <p className="text-xs font-semibold text-red-700">
-                                {`${formatTimeLower(item.startMinutes)} - ${formatTimeLower(item.endMinutes)}`}
-                              </p>
-                              <p className="text-sm font-semibold text-gray-900 leading-tight">
-                                {item.title}
-                              </p>
-                              <p className="text-xs text-gray-600 mt-0.5">
-                                {item.venue} • Screen {item.screen}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
+                {DAYS.map((day) => {
+                  const items = selectedScheduleByDay[day];
+                  return items.length ? (
+                    <TimelineDay key={day} day={day} items={items} />
+                  ) : null;
                 })}
               </div>
             </aside>
