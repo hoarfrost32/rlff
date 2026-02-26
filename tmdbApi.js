@@ -2,6 +2,7 @@ const posterCache = {};
 const overviewCache = {};
 const trailerCache = {};
 const letterboxdCache = {};
+const originalTitleCache = {};
 const lookupInflight = {};
 
 const getCacheKey = (title, details = "") => `${title}__${details}`;
@@ -15,6 +16,8 @@ export const getCachedTrailerUrl = (title, details = "") =>
   trailerCache[getCacheKey(title, details)] || null;
 export const getCachedLetterboxdUrl = (title, details = "") =>
   letterboxdCache[getCacheKey(title, details)] || null;
+export const getCachedOriginalTitle = (title, details = "") =>
+  originalTitleCache[getCacheKey(title, details)] || null;
 
 const deriveLetterboxdUrl = ({ tmdbId }) =>
   tmdbId ? `https://letterboxd.com/tmdb/${tmdbId}` : "not_found";
@@ -31,6 +34,7 @@ const fetchTmdbRecord = async ({ title, details = "" }) => {
     posterUrl: data?.posterUrl || "not_found",
     overview: data?.overview || "not_found",
     trailerUrl: data?.trailerUrl || "not_found",
+    originalTitle: data?.originalTitle || "not_found",
     letterboxdUrl: deriveLetterboxdUrl({
       tmdbId: data?.tmdbId,
     }),
@@ -53,7 +57,7 @@ export const fetchPosterUrl = async ({ title, details = "" }) => {
   if (posterCache[cacheKey]) return posterCache[cacheKey];
 
   try {
-    const { posterUrl, overview, trailerUrl, letterboxdUrl } =
+    const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
       await resolveTmdbRecord({
         title,
         details,
@@ -62,6 +66,7 @@ export const fetchPosterUrl = async ({ title, details = "" }) => {
     overviewCache[cacheKey] = overview;
     trailerCache[cacheKey] = trailerUrl;
     letterboxdCache[cacheKey] = letterboxdUrl;
+    originalTitleCache[cacheKey] = originalTitle;
     return posterUrl;
   } catch (error) {
     console.error("Failed to fetch poster for", title, error.message);
@@ -69,6 +74,7 @@ export const fetchPosterUrl = async ({ title, details = "" }) => {
     overviewCache[cacheKey] = "not_found";
     trailerCache[cacheKey] = "not_found";
     letterboxdCache[cacheKey] = "not_found";
+    originalTitleCache[cacheKey] = "not_found";
     return "not_found";
   }
 };
@@ -78,7 +84,7 @@ export const fetchMovieOverview = async ({ title, details = "" }) => {
   if (overviewCache[cacheKey]) return overviewCache[cacheKey];
 
   try {
-    const { posterUrl, overview, trailerUrl, letterboxdUrl } =
+    const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
       await resolveTmdbRecord({
         title,
         details,
@@ -87,6 +93,8 @@ export const fetchMovieOverview = async ({ title, details = "" }) => {
     if (!posterCache[cacheKey]) posterCache[cacheKey] = posterUrl;
     if (!trailerCache[cacheKey]) trailerCache[cacheKey] = trailerUrl;
     if (!letterboxdCache[cacheKey]) letterboxdCache[cacheKey] = letterboxdUrl;
+    if (!originalTitleCache[cacheKey])
+      originalTitleCache[cacheKey] = originalTitle;
     return overview;
   } catch (error) {
     console.error("Failed to fetch overview for", title, error.message);
@@ -100,7 +108,7 @@ export const fetchTrailerUrl = async ({ title, details = "" }) => {
   if (trailerCache[cacheKey]) return trailerCache[cacheKey];
 
   try {
-    const { posterUrl, overview, trailerUrl, letterboxdUrl } =
+    const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
       await resolveTmdbRecord({
         title,
         details,
@@ -109,6 +117,8 @@ export const fetchTrailerUrl = async ({ title, details = "" }) => {
     if (!posterCache[cacheKey]) posterCache[cacheKey] = posterUrl;
     if (!overviewCache[cacheKey]) overviewCache[cacheKey] = overview;
     if (!letterboxdCache[cacheKey]) letterboxdCache[cacheKey] = letterboxdUrl;
+    if (!originalTitleCache[cacheKey])
+      originalTitleCache[cacheKey] = originalTitle;
     return trailerUrl;
   } catch (error) {
     console.error("Failed to fetch trailer for", title, error.message);
@@ -122,7 +132,7 @@ export const fetchLetterboxdUrl = async ({ title, details = "" }) => {
   if (letterboxdCache[cacheKey]) return letterboxdCache[cacheKey];
 
   try {
-    const { posterUrl, overview, trailerUrl, letterboxdUrl } =
+    const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
       await resolveTmdbRecord({
         title,
         details,
@@ -131,10 +141,35 @@ export const fetchLetterboxdUrl = async ({ title, details = "" }) => {
     if (!posterCache[cacheKey]) posterCache[cacheKey] = posterUrl;
     if (!overviewCache[cacheKey]) overviewCache[cacheKey] = overview;
     if (!trailerCache[cacheKey]) trailerCache[cacheKey] = trailerUrl;
+    if (!originalTitleCache[cacheKey])
+      originalTitleCache[cacheKey] = originalTitle;
     return letterboxdUrl;
   } catch (error) {
     console.error("Failed to fetch letterboxd URL for", title, error.message);
     letterboxdCache[cacheKey] = "not_found";
+    return "not_found";
+  }
+};
+
+export const fetchOriginalTitle = async ({ title, details = "" }) => {
+  const cacheKey = getCacheKey(title, details);
+  if (originalTitleCache[cacheKey]) return originalTitleCache[cacheKey];
+
+  try {
+    const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
+      await resolveTmdbRecord({
+        title,
+        details,
+      });
+    originalTitleCache[cacheKey] = originalTitle;
+    if (!posterCache[cacheKey]) posterCache[cacheKey] = posterUrl;
+    if (!overviewCache[cacheKey]) overviewCache[cacheKey] = overview;
+    if (!trailerCache[cacheKey]) trailerCache[cacheKey] = trailerUrl;
+    if (!letterboxdCache[cacheKey]) letterboxdCache[cacheKey] = letterboxdUrl;
+    return originalTitle;
+  } catch (error) {
+    console.error("Failed to fetch original title for", title, error.message);
+    originalTitleCache[cacheKey] = "not_found";
     return "not_found";
   }
 };

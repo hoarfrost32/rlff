@@ -13,11 +13,13 @@ import { jsPDF } from "jspdf";
 import { daysMap, rawScheduleData, venuesList } from "./scheduleDb";
 import {
   fetchLetterboxdUrl,
+  fetchOriginalTitle,
   fetchMovieOverview,
   fetchPosterUrl,
   fetchTrailerUrl,
   getCachedLetterboxdUrl,
   getCachedMovieOverview,
+  getCachedOriginalTitle,
   getCachedPosterUrl,
   getCachedTrailerUrl,
 } from "./tmdbApi";
@@ -294,6 +296,9 @@ const ScreeningCard = ({
   const [letterboxdUrl, setLetterboxdUrl] = useState(
     () => getCachedLetterboxdUrl(title, details) || null,
   );
+  const [originalTitle, setOriginalTitle] = useState(
+    () => getCachedOriginalTitle(title, details) || null,
+  );
 
   useEffect(() => {
     if (isTBC) return;
@@ -313,7 +318,26 @@ const ScreeningCard = ({
     };
   }, [title, details, isTBC]);
 
+  useEffect(() => {
+    if (isTBC) return;
+    const cached = getCachedOriginalTitle(title, details);
+    if (cached) {
+      setOriginalTitle(cached);
+      return;
+    }
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      const value = await fetchOriginalTitle({ title, details });
+      if (isMounted) setOriginalTitle(value);
+    }, getTmdbFetchDelay());
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [title, details, isTBC]);
+
   const hasLetterboxd = letterboxdUrl && letterboxdUrl !== "not_found";
+  const hasOriginalTitle = originalTitle && originalTitle !== "not_found";
   return (
     <div
       role="button"
@@ -348,6 +372,11 @@ const ScreeningCard = ({
               title
             )}
           </h3>
+          {hasOriginalTitle && (
+            <p className="text-xs text-gray-500 italic -mt-1 mb-2 break-words">
+              {originalTitle}
+            </p>
+          )}
           {isSelected && (
             <span className="inline-flex items-center mb-2 text-[11px] font-bold text-red-700 bg-red-100 border border-red-200 rounded px-2 py-0.5">
               Selected
