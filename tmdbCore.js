@@ -357,6 +357,9 @@ export const resolveTmdbMovie = async ({ title, details = "", tmdbToken }) => {
       posterUrl: "not_found",
       overview: "not_found",
       trailerUrl: "not_found",
+      tmdbId: null,
+      resolvedTitle: "not_found",
+      releaseDate: "not_found",
     };
   }
 
@@ -378,6 +381,9 @@ export const resolveTmdbMovie = async ({ title, details = "", tmdbToken }) => {
       posterUrl: "not_found",
       overview: "not_found",
       trailerUrl: "not_found",
+      tmdbId: null,
+      resolvedTitle: "not_found",
+      releaseDate: "not_found",
     };
   }
 
@@ -392,5 +398,8 @@ export const resolveTmdbMovie = async ({ title, details = "", tmdbToken }) => {
       : "not_found",
     overview: best.movie?.overview?.trim() || "not_found",
     trailerUrl,
+    tmdbId: best.movie?.id || null,
+    resolvedTitle: best.movie?.title?.trim() || "not_found",
+    releaseDate: best.movie?.release_date?.trim() || "not_found",
   };
 };

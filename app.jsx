@@ -12,9 +12,11 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { daysMap, rawScheduleData, venuesList } from "./scheduleDb";
 import {
+  fetchLetterboxdUrl,
   fetchMovieOverview,
   fetchPosterUrl,
   fetchTrailerUrl,
+  getCachedLetterboxdUrl,
   getCachedMovieOverview,
   getCachedPosterUrl,
   getCachedTrailerUrl,
@@ -289,6 +291,29 @@ const ScreeningCard = ({
   const { id, venue, screen, time, title, details, isTBC } = item;
   const isDarkened = !isSelected && isConflicting;
   const hasMeet = details.toLowerCase().includes("meet");
+  const [letterboxdUrl, setLetterboxdUrl] = useState(
+    () => getCachedLetterboxdUrl(title, details) || null,
+  );
+
+  useEffect(() => {
+    if (isTBC) return;
+    const cached = getCachedLetterboxdUrl(title, details);
+    if (cached) {
+      setLetterboxdUrl(cached);
+      return;
+    }
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      const value = await fetchLetterboxdUrl({ title, details });
+      if (isMounted) setLetterboxdUrl(value);
+    }, getTmdbFetchDelay());
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [title, details, isTBC]);
+
+  const hasLetterboxd = letterboxdUrl && letterboxdUrl !== "not_found";
   return (
     <div
       role="button"
@@ -309,7 +334,19 @@ const ScreeningCard = ({
           <h3
             className={`font-bold text-lg leading-tight break-words mb-2 ${isTBC ? "text-gray-500 italic" : "text-gray-900"}`}
           >
-            {title}
+            {hasLetterboxd ? (
+              <a
+                href={letterboxdUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(event) => event.stopPropagation()}
+                className="underline decoration-red-300 underline-offset-2 hover:text-red-700 hover:decoration-red-500"
+              >
+                {title}
+              </a>
+            ) : (
+              title
+            )}
           </h3>
           {isSelected && (
             <span className="inline-flex items-center mb-2 text-[11px] font-bold text-red-700 bg-red-100 border border-red-200 rounded px-2 py-0.5">
