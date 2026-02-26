@@ -16,31 +16,8 @@ export const getCachedTrailerUrl = (title, details = "") =>
 export const getCachedLetterboxdUrl = (title, details = "") =>
   letterboxdCache[getCacheKey(title, details)] || null;
 
-const slugify = (value) =>
-  (value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['".,!?&:()[\]{}]/g, " ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-const deriveLetterboxdUrl = ({
-  tmdbId,
-  resolvedTitle = "",
-  releaseDate = "",
-  fallbackTitle = "",
-}) => {
-  if (tmdbId) return `https://letterboxd.com/tmdb/${tmdbId}`;
-  const year = (releaseDate || "").slice(0, 4);
-  const slugBase = slugify(resolvedTitle) || slugify(fallbackTitle);
-  if (!slugBase) return "not_found";
-  const slugWithYear =
-    Number.isFinite(Number(year)) && year.length === 4
-      ? `${slugBase}-${year}`
-      : slugBase;
-  return `https://letterboxd.com/film/${slugWithYear}/`;
-};
+const deriveLetterboxdUrl = ({ tmdbId }) =>
+  tmdbId ? `https://letterboxd.com/tmdb/${tmdbId}` : "not_found";
 
 const fetchTmdbRecord = async ({ title, details = "" }) => {
   const res = await fetch("/api/tmdb", {
@@ -56,9 +33,6 @@ const fetchTmdbRecord = async ({ title, details = "" }) => {
     trailerUrl: data?.trailerUrl || "not_found",
     letterboxdUrl: deriveLetterboxdUrl({
       tmdbId: data?.tmdbId,
-      resolvedTitle: data?.resolvedTitle,
-      releaseDate: data?.releaseDate,
-      fallbackTitle: title,
     }),
   };
 };
