@@ -337,7 +337,10 @@ const ScreeningCard = ({
   }, [title, details, isTBC]);
 
   const hasLetterboxd = letterboxdUrl && letterboxdUrl !== "not_found";
-  const hasOriginalTitle = originalTitle && originalTitle !== "not_found";
+  const hasOriginalTitle =
+    originalTitle &&
+    originalTitle !== "not_found" &&
+    originalTitle.trim().toLowerCase() !== title.trim().toLowerCase();
   return (
     <div
       role="button"
