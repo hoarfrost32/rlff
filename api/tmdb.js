@@ -20,6 +20,12 @@ export default async function handler(req, res) {
     return res.status(200).json(result);
   } catch (error) {
     console.error("TMDB server error:", error);
-    return res.status(500).json({ posterUrl: "not_found", overview: "not_found" });
+    return res
+      .status(500)
+      .json({
+        posterUrl: "not_found",
+        overview: "not_found",
+        trailerUrl: "not_found",
+      });
   }
 }

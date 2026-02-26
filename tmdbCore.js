@@ -221,9 +221,12 @@ const scoreMovieCandidate = (movie, normalizedTitle, metadata) => {
 
 const fetchMovieDirectors = async (movieId, headers) => {
   try {
-    const res = await fetch(`https://api.themoviedb.org/3/movie/${movieId}/credits`, {
-      headers,
-    });
+    const res = await fetch(
+      `https://api.themoviedb.org/3/movie/${movieId}/credits`,
+      {
+        headers,
+      },
+    );
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data?.crew)
@@ -233,6 +236,37 @@ const fetchMovieDirectors = async (movieId, headers) => {
       : [];
   } catch {
     return [];
+  }
+};
+
+const fetchMovieTrailerUrl = async (movieId, headers) => {
+  try {
+    const res = await fetch(
+      `https://api.themoviedb.org/3/movie/${movieId}/videos`,
+      {
+        headers,
+      },
+    );
+    if (!res.ok) return "not_found";
+    const data = await res.json();
+    const videos = Array.isArray(data?.results) ? data.results : [];
+    const youtubeVideos = videos.filter(
+      (video) => video?.site === "YouTube" && video?.key,
+    );
+    if (!youtubeVideos.length) return "not_found";
+
+    const pickBy = (predicate) => youtubeVideos.find(predicate);
+    const bestTrailer =
+      pickBy((video) => video.official && video.type === "Trailer") ||
+      pickBy((video) => video.type === "Trailer") ||
+      pickBy((video) => video.official) ||
+      youtubeVideos[0];
+
+    return bestTrailer?.key
+      ? `https://www.youtube.com/watch?v=${bestTrailer.key}`
+      : "not_found";
+  } catch {
+    return "not_found";
   }
 };
 
@@ -282,13 +316,19 @@ const runTmdbSearchRequests = async ({
     }
   }
 
-  const ranked = Array.from(scoredById.values()).sort((a, b) => b.score - a.score);
+  const ranked = Array.from(scoredById.values()).sort(
+    (a, b) => b.score - a.score,
+  );
   let best = ranked[0];
 
   if (directorHint) {
     const normalizedDirectorHint = normalize(directorHint);
     const shortlist = ranked
-      .filter((candidate) => Number.isFinite(candidate.score) && candidate.score >= MIN_ACCEPTED_SCORE)
+      .filter(
+        (candidate) =>
+          Number.isFinite(candidate.score) &&
+          candidate.score >= MIN_ACCEPTED_SCORE,
+      )
       .slice(0, 5);
 
     for (const candidate of shortlist) {
@@ -313,7 +353,11 @@ const runTmdbSearchRequests = async ({
 
 export const resolveTmdbMovie = async ({ title, details = "", tmdbToken }) => {
   if (!tmdbToken) {
-    return { posterUrl: "not_found", overview: "not_found" };
+    return {
+      posterUrl: "not_found",
+      overview: "not_found",
+      trailerUrl: "not_found",
+    };
   }
 
   const { preferredTitle, directorHint, metadata, requests } =
@@ -330,13 +374,23 @@ export const resolveTmdbMovie = async ({ title, details = "", tmdbToken }) => {
   });
 
   if (!hasAcceptableScore(best)) {
-    return { posterUrl: "not_found", overview: "not_found" };
+    return {
+      posterUrl: "not_found",
+      overview: "not_found",
+      trailerUrl: "not_found",
+    };
   }
+
+  const trailerUrl = await fetchMovieTrailerUrl(best.movie.id, {
+    Authorization: `Bearer ${tmdbToken}`,
+    Accept: "application/json",
+  });
 
   return {
     posterUrl: best.movie?.poster_path
       ? `${TMDB_IMAGE_BASE}${best.movie.poster_path}`
       : "not_found",
     overview: best.movie?.overview?.trim() || "not_found",
+    trailerUrl,
   };
 };

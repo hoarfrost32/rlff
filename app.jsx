@@ -3,6 +3,7 @@ import {
   Calendar,
   Image as ImageIcon,
   MapPin,
+  Play,
   Search,
   Star,
   Video,
@@ -13,8 +14,10 @@ import { daysMap, rawScheduleData, venuesList } from "./scheduleDb";
 import {
   fetchMovieOverview,
   fetchPosterUrl,
+  fetchTrailerUrl,
   getCachedMovieOverview,
   getCachedPosterUrl,
+  getCachedTrailerUrl,
 } from "./tmdbApi";
 
 const DAYS = [1, 2, 3];
@@ -96,14 +99,24 @@ const MoviePoster = ({ title, details, isTBC }) => {
   const [posterUrl, setPosterUrl] = useState(
     () => getCachedPosterUrl(title, details) || null,
   );
+  const [trailerUrl, setTrailerUrl] = useState(
+    () => getCachedTrailerUrl(title, details) || null,
+  );
   const [loading, setLoading] = useState(
-    () => !getCachedPosterUrl(title, details) && !isTBC,
+    () =>
+      (!getCachedPosterUrl(title, details) ||
+        !getCachedTrailerUrl(title, details)) &&
+      !isTBC,
   );
   const [isInView, setIsInView] = useState(false);
   const containerRef = useRef(null);
 
   useEffect(() => {
-    if (isTBC || getCachedPosterUrl(title, details))
+    if (
+      isTBC ||
+      (getCachedPosterUrl(title, details) &&
+        getCachedTrailerUrl(title, details))
+    )
       return void setIsInView(true);
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -119,19 +132,27 @@ const MoviePoster = ({ title, details, isTBC }) => {
 
   useEffect(() => {
     const cachedPoster = getCachedPosterUrl(title, details);
-    if (!isInView || isTBC || cachedPoster) {
+    const cachedTrailer = getCachedTrailerUrl(title, details);
+    if (!isInView || isTBC || (cachedPoster && cachedTrailer)) {
       if (cachedPoster) {
         setPosterUrl(cachedPoster);
-        setLoading(false);
       }
+      if (cachedTrailer) setTrailerUrl(cachedTrailer);
+      if (cachedPoster && cachedTrailer) setLoading(false);
       return;
     }
 
     let isMounted = true;
     const timer = setTimeout(async () => {
       try {
-        const url = await fetchPosterUrl({ title, details });
-        if (isMounted) setPosterUrl(url);
+        const [poster, trailer] = await Promise.all([
+          fetchPosterUrl({ title, details }),
+          fetchTrailerUrl({ title, details }),
+        ]);
+        if (isMounted) {
+          setPosterUrl(poster);
+          setTrailerUrl(trailer);
+        }
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -147,7 +168,7 @@ const MoviePoster = ({ title, details, isTBC }) => {
   return (
     <div
       ref={containerRef}
-      className="w-16 h-24 shrink-0 bg-gray-100 rounded-md overflow-hidden flex items-center justify-center border border-gray-200 shadow-sm"
+      className="relative w-16 h-24 shrink-0 bg-gray-100 rounded-md overflow-hidden flex items-center justify-center border border-gray-200 shadow-sm"
     >
       {loading ? (
         <div className="animate-pulse bg-gray-200 w-full h-full" />
@@ -159,6 +180,20 @@ const MoviePoster = ({ title, details, isTBC }) => {
         />
       ) : (
         <ImageIcon className="w-6 h-6 text-gray-300" />
+      )}
+      {trailerUrl && trailerUrl !== "not_found" && (
+        <button
+          type="button"
+          aria-label={`Play trailer for ${title}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            window.open(trailerUrl, "_blank", "noopener,noreferrer");
+          }}
+          className="absolute bottom-1 right-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        >
+          <Play className="h-3.5 w-3.5 fill-current" />
+        </button>
       )}
     </div>
   );
