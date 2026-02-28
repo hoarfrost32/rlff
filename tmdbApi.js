@@ -1,3 +1,5 @@
+import { resolveTmdbMovie } from "./tmdbCore";
+
 const posterCache = {};
 const overviewCache = {};
 const trailerCache = {};
@@ -22,23 +24,60 @@ export const getCachedOriginalTitle = (title, details = "") =>
 const deriveLetterboxdUrl = ({ tmdbId }) =>
   tmdbId ? `https://letterboxd.com/tmdb/${tmdbId}` : "not_found";
 
-const fetchTmdbRecord = async ({ title, details = "" }) => {
+const mapRecordData = (data) => ({
+  posterUrl: data?.posterUrl || "not_found",
+  overview: data?.overview || "not_found",
+  trailerUrl: data?.trailerUrl || "not_found",
+  originalTitle: data?.originalTitle || "not_found",
+  letterboxdUrl: deriveLetterboxdUrl({
+    tmdbId: data?.tmdbId,
+  }),
+});
+
+const fetchTmdbRecordViaApi = async ({ title, details = "" }) => {
   const res = await fetch("/api/tmdb", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title, details }),
   });
   if (!res.ok) throw new Error(`TMDB API request failed (${res.status})`);
-  const data = await res.json();
-  return {
-    posterUrl: data?.posterUrl || "not_found",
-    overview: data?.overview || "not_found",
-    trailerUrl: data?.trailerUrl || "not_found",
-    originalTitle: data?.originalTitle || "not_found",
-    letterboxdUrl: deriveLetterboxdUrl({
-      tmdbId: data?.tmdbId,
-    }),
-  };
+  return mapRecordData(await res.json());
+};
+
+const fetchTmdbRecordViaLocalDevToken = async ({ title, details = "" }) => {
+  const token = import.meta.env?.VITE_TMDB_READ_ACCESS_TOKEN || "";
+  if (!import.meta.env.DEV || !token) {
+    throw new Error("Local TMDB token is not available");
+  }
+  const data = await resolveTmdbMovie({
+    title,
+    details,
+    tmdbToken: token,
+  });
+  return mapRecordData(data);
+};
+
+const isHardNotFoundRecord = (record) =>
+  record?.posterUrl === "not_found" &&
+  record?.overview === "not_found" &&
+  record?.trailerUrl === "not_found" &&
+  record?.originalTitle === "not_found" &&
+  record?.letterboxdUrl === "not_found";
+
+const fetchTmdbRecord = async ({ title, details = "" }) => {
+  try {
+    const apiRecord = await fetchTmdbRecordViaApi({ title, details });
+    if (!isHardNotFoundRecord(apiRecord)) return apiRecord;
+    if (!import.meta.env.DEV || !import.meta.env?.VITE_TMDB_READ_ACCESS_TOKEN) {
+      return apiRecord;
+    }
+    return await fetchTmdbRecordViaLocalDevToken({ title, details });
+  } catch (error) {
+    if (!import.meta.env.DEV || !import.meta.env?.VITE_TMDB_READ_ACCESS_TOKEN) {
+      throw error;
+    }
+    return await fetchTmdbRecordViaLocalDevToken({ title, details });
+  }
 };
 
 const resolveTmdbRecord = async ({ title, details = "" }) => {
