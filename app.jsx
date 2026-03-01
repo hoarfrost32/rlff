@@ -4,8 +4,10 @@ import {
   Image as ImageIcon,
   MapPin,
   Play,
+  Save,
   Search,
   Star,
+  Upload,
   Video,
 } from "lucide-react";
 import html2canvas from "html2canvas";
@@ -100,212 +102,6 @@ const formatTimelineDayLabel = (dayLabel) => {
 };
 const dayLabelShort = (dayId) =>
   daysMap[dayId]?.split(",")[0] || `Day ${dayId}`;
-const isMaisonVenue = (venue = "") => venue.toUpperCase().includes("MAISON");
-const getTravelMinutes = (fromVenue, toVenue) => {
-  if (!fromVenue || !toVenue || fromVenue === toVenue) return 0;
-  return isMaisonVenue(fromVenue) || isMaisonVenue(toVenue) ? 60 : 25;
-};
-const canAttendScreeningAfter = (previous, next) => {
-  if (!previous) return true;
-  if (next.dayId > previous.dayId) return true;
-  if (next.dayId < previous.dayId) return false;
-  return (
-    next.startMinutes >=
-    previous.endMinutes + getTravelMinutes(previous.venue, next.venue)
-  );
-};
-const screeningSortKey = (screening) =>
-  screening.dayId * 24 * 60 + screening.startMinutes;
-const compareScreenings = (a, b) => {
-  const startDelta = screeningSortKey(a) - screeningSortKey(b);
-  if (startDelta !== 0) return startDelta;
-  return a.endMinutes - b.endMinutes;
-};
-const makeDayVenueState = () =>
-  Object.fromEntries(
-    DAYS.map((dayId) => [
-      dayId,
-      { firstVenue: null, secondVenue: null, hasSwitched: false },
-    ]),
-  );
-const encodeDayVenueState = (state) =>
-  DAYS.map((dayId) => {
-    const dayState = state[dayId];
-    return `${dayState.firstVenue || "-"}>${dayState.secondVenue || "-"}>${dayState.hasSwitched ? 1 : 0}`;
-  }).join("|");
-const applyDayVenueRule = (state, screening) => {
-  const currentDay = state[screening.dayId];
-  if (!currentDay) return null;
-  const venue = screening.venue;
-
-  if (!currentDay.firstVenue) {
-    return {
-      ...state,
-      [screening.dayId]: {
-        firstVenue: venue,
-        secondVenue: null,
-        hasSwitched: false,
-      },
-    };
-  }
-
-  if (!currentDay.hasSwitched) {
-    if (venue === currentDay.firstVenue) return state;
-    return {
-      ...state,
-      [screening.dayId]: {
-        firstVenue: currentDay.firstVenue,
-        secondVenue: venue,
-        hasSwitched: true,
-      },
-    };
-  }
-
-  if (venue === currentDay.secondVenue) return state;
-  return null;
-};
-
-const buildGreedyWatchlistPlan = (candidates) => {
-  const unwatchedTitles = new Set(candidates.map((item) => item.title));
-  const sorted = [...candidates].sort(compareScreenings);
-  const selected = [];
-  let current = null;
-  let dayVenueState = makeDayVenueState();
-  while (unwatchedTitles.size) {
-    let best = null;
-    let bestDayVenueState = null;
-    for (const screening of sorted) {
-      if (!unwatchedTitles.has(screening.title)) continue;
-      if (!canAttendScreeningAfter(current, screening)) continue;
-      const nextDayVenueState = applyDayVenueRule(dayVenueState, screening);
-      if (!nextDayVenueState) continue;
-      if (!best || compareScreenings(screening, best) < 0) {
-        best = screening;
-        bestDayVenueState = nextDayVenueState;
-      }
-    }
-    if (!best) break;
-    selected.push(best);
-    unwatchedTitles.delete(best.title);
-    current = best;
-    dayVenueState = bestDayVenueState;
-  }
-  return selected;
-};
-
-const buildBestWatchlistPlan = (films, excludedScreeningIds = new Set()) => {
-  if (!films.length) return [];
-  const titleCount = films.length;
-  if (titleCount > 20) {
-    const flattened = films.flatMap((film, titleIndex) =>
-      film.screenings.map((screening) => ({ ...screening, titleIndex })),
-    );
-    return buildGreedyWatchlistPlan(
-      flattened.filter((screening) => !excludedScreeningIds.has(screening.id)),
-    );
-  }
-
-  const screenings = films
-    .flatMap((film, titleIndex) =>
-      film.screenings.map((screening) => ({ ...screening, titleIndex })),
-    )
-    .filter((screening) => !excludedScreeningIds.has(screening.id))
-    .sort(compareScreenings);
-
-  if (!screenings.length) return [];
-
-  const memo = new Map();
-  const pickBetter = (candidate, incumbent) => {
-    if (incumbent === -1) return true;
-    const candidateItem = screenings[candidate];
-    const incumbentItem = screenings[incumbent];
-    return compareScreenings(candidateItem, incumbentItem) < 0;
-  };
-
-  const solve = (lastIndex, mask, dayVenueState) => {
-    const memoKey = `${lastIndex}|${mask}|${encodeDayVenueState(dayVenueState)}`;
-    if (memo.has(memoKey)) return memo.get(memoKey);
-
-    let bestCount = 0;
-    let bestNextIndex = -1;
-    const previous = lastIndex === -1 ? null : screenings[lastIndex];
-
-    for (let index = 0; index < screenings.length; index += 1) {
-      const screening = screenings[index];
-      const bit = 1 << screening.titleIndex;
-      if (mask & bit) continue;
-      if (!canAttendScreeningAfter(previous, screening)) continue;
-      const nextDayVenueState = applyDayVenueRule(dayVenueState, screening);
-      if (!nextDayVenueState) continue;
-
-      const candidate = solve(index, mask | bit, nextDayVenueState);
-      const candidateCount = 1 + candidate.bestCount;
-      if (
-        candidateCount > bestCount ||
-        (candidateCount === bestCount && pickBetter(index, bestNextIndex))
-      ) {
-        bestCount = candidateCount;
-        bestNextIndex = index;
-      }
-    }
-
-    const resolved = { bestCount, bestNextIndex };
-    memo.set(memoKey, resolved);
-    return resolved;
-  };
-
-  const chosen = [];
-  let lastIndex = -1;
-  let mask = 0;
-  let dayVenueState = makeDayVenueState();
-  while (true) {
-    const state = solve(lastIndex, mask, dayVenueState);
-    if (state.bestNextIndex === -1) break;
-    const next = screenings[state.bestNextIndex];
-    chosen.push(next);
-    mask |= 1 << next.titleIndex;
-    lastIndex = state.bestNextIndex;
-    dayVenueState = applyDayVenueRule(dayVenueState, next) || dayVenueState;
-  }
-  return chosen;
-};
-
-const buildWatchlistPlans = (films, desiredPlanCount = 3) => {
-  if (!films.length) return [];
-  const plans = [];
-  const seenPlanKeys = new Set();
-  const seenExclusionKeys = new Set();
-  const queue = [new Set()];
-  let iterations = 0;
-
-  while (queue.length && plans.length < desiredPlanCount && iterations < 120) {
-    iterations += 1;
-    const exclusions = queue.shift();
-    const exclusionKey = [...exclusions].sort((a, b) => a - b).join(",");
-    if (seenExclusionKeys.has(exclusionKey)) continue;
-    seenExclusionKeys.add(exclusionKey);
-
-    const plan = buildBestWatchlistPlan(films, exclusions);
-    if (!plan.length) continue;
-
-    const planKey = plan
-      .map((screening) => screening.id)
-      .sort((a, b) => a - b)
-      .join(",");
-    if (seenPlanKeys.has(planKey)) continue;
-    seenPlanKeys.add(planKey);
-    plans.push(plan);
-
-    for (const screening of plan) {
-      const nextExclusions = new Set(exclusions);
-      nextExclusions.add(screening.id);
-      queue.push(nextExclusions);
-      if (queue.length > 300) break;
-    }
-  }
-
-  return plans;
-};
 
 const areIdListsEqual = (a = [], b = []) =>
   a.length === b.length && a.every((id, index) => id === b[index]);
@@ -668,11 +464,16 @@ export default function App() {
   );
   const [activePlanIndex, setActivePlanIndex] = useState(null);
   const [isWatchlistMode, setIsWatchlistMode] = useState(false);
+  const [watchlistPlans, setWatchlistPlans] = useState([]);
+  const [isWatchlistPlanning, setIsWatchlistPlanning] = useState(false);
   const [hoveredDescriptionCardId, setHoveredDescriptionCardId] =
     useState(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [selectionImportMessage, setSelectionImportMessage] = useState("");
   const hoverDelayTimerRef = useRef(null);
   const timelineRef = useRef(null);
+  const selectionImportInputRef = useRef(null);
+  const watchlistPlanRequestIdRef = useRef(0);
 
   const allScheduleItems = useMemo(
     () =>
@@ -698,6 +499,19 @@ export default function App() {
   const selectedIdSet = useMemo(
     () => new Set(selectedMovieIds),
     [selectedMovieIds],
+  );
+  const allScheduleIdSet = useMemo(
+    () => new Set(allScheduleItems.map((item) => item.id)),
+    [allScheduleItems],
+  );
+  const allSelectableTitleSet = useMemo(
+    () =>
+      new Set(
+        allScheduleItems
+          .filter((item) => !item.isTBC)
+          .map((item) => item.title),
+      ),
+    [allScheduleItems],
   );
   const selectedTitleSet = useMemo(
     () => new Set(selectedMovieTitles),
@@ -739,10 +553,58 @@ export default function App() {
         );
       });
   }, [allScheduleItems, selectedTitleSet]);
-  const watchlistPlans = useMemo(
-    () => buildWatchlistPlans(selectedWatchlistFilms, PLAN_COUNT),
-    [selectedWatchlistFilms],
-  );
+  useEffect(() => {
+    watchlistPlanRequestIdRef.current += 1;
+    const requestId = watchlistPlanRequestIdRef.current;
+
+    if (!selectedWatchlistFilms.length) {
+      setWatchlistPlans([]);
+      setIsWatchlistPlanning(false);
+      return undefined;
+    }
+
+    setWatchlistPlans([]);
+    setIsWatchlistPlanning(true);
+    const worker = new Worker(
+      new URL("./watchlistPlanWorker.js", import.meta.url),
+      {
+        type: "module",
+      },
+    );
+
+    const handleMessage = (event) => {
+      if (requestId !== watchlistPlanRequestIdRef.current) return;
+      const payload = event.data || {};
+      if (payload.error) {
+        console.error("Watchlist planner worker failed:", payload.error);
+        setWatchlistPlans([]);
+      } else {
+        setWatchlistPlans(Array.isArray(payload.plans) ? payload.plans : []);
+      }
+      setIsWatchlistPlanning(false);
+    };
+
+    const handleError = (error) => {
+      if (requestId !== watchlistPlanRequestIdRef.current) return;
+      console.error("Watchlist planner worker crashed:", error);
+      setWatchlistPlans([]);
+      setIsWatchlistPlanning(false);
+    };
+
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({
+      requestId,
+      films: selectedWatchlistFilms,
+      desiredPlanCount: PLAN_COUNT,
+    });
+
+    return () => {
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+      worker.terminate();
+    };
+  }, [PLAN_COUNT, selectedWatchlistFilms]);
   const watchlistPlansByIndex = useMemo(
     () =>
       Array.from(
@@ -825,6 +687,7 @@ export default function App() {
     setHoveredDescriptionCardId((prev) => (prev === cardId ? null : prev));
   };
   const applyWatchlistPlan = (index) => {
+    if (isWatchlistPlanning) return;
     const selectedPlan = watchlistPlansByIndex[index];
     if (!selectedPlan) return;
     const nextVariants = watchlistPlansByIndex.map((plan) =>
@@ -842,49 +705,135 @@ export default function App() {
     setSelectedMovieIds(plan);
   };
 
-  const downloadPlanVariants = () => {
-    const plansPayload = planVariants.map((planIds, index) => {
-      const selectedItems = (planIds || [])
-        .map((id) => allScheduleItems.find((item) => item.id === id))
-        .filter(Boolean)
-        .sort((a, b) => a.dayId - b.dayId || a.startMinutes - b.startMinutes)
-        .map((item) => ({
-          id: item.id,
-          dayId: item.dayId,
-          day: daysMap[item.dayId],
-          title: item.title,
-          time: item.time,
-          venue: item.venue,
-          screen: item.screen,
-          details: item.details,
-        }));
-      return {
-        plan: `Plan ${index + 1}`,
-        active: activePlanIndex === index,
-        count: selectedItems.length,
-        screenings: selectedItems,
-      };
+  const sanitizeSelectionIds = (value) =>
+    Array.isArray(value)
+      ? Array.from(
+          new Set(
+            value.filter(
+              (id) => Number.isInteger(id) && allScheduleIdSet.has(id),
+            ),
+          ),
+        )
+      : [];
+  const sanitizeSelectionTitles = (value) =>
+    Array.isArray(value)
+      ? Array.from(
+          new Set(
+            value.filter(
+              (title) =>
+                typeof title === "string" && allSelectableTitleSet.has(title),
+            ),
+          ),
+        )
+      : [];
+  const downloadSelectionJson = ({
+    mode,
+    selectedIds = [],
+    selectedTitles = [],
+    fileName = "rlff-selection.json",
+  }) => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      type: "rlff-selection",
+      mode,
+      selectedMovieIds: sanitizeSelectionIds(selectedIds),
+      selectedMovieTitles: sanitizeSelectionTitles(selectedTitles),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
     });
-
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            exportedAt: new Date().toISOString(),
-            plans: plansPayload,
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: "application/json" },
-    );
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "rlff-plan-variants.json";
+    link.download = fileName;
     link.click();
     URL.revokeObjectURL(url);
+  };
+  const exportCurrentSelection = () => {
+    if (isWatchlistMode) {
+      downloadSelectionJson({
+        mode: "watchlist",
+        selectedTitles: selectedMovieTitles,
+        fileName: "rlff-watchlist-selection.json",
+      });
+      return;
+    }
+    downloadSelectionJson({
+      mode: "timeline",
+      selectedIds: selectedMovieIds,
+      fileName: "rlff-timeline-selection.json",
+    });
+  };
+  const exportWatchlistPlan = (index) => {
+    if (isWatchlistPlanning) return;
+    const plan = watchlistPlansByIndex[index];
+    if (!plan) return;
+    downloadSelectionJson({
+      mode: "timeline",
+      selectedIds: plan.map((screening) => screening.id),
+      fileName: `rlff-plan-${index + 1}.json`,
+    });
+  };
+  const promptSelectionImport = () => {
+    setSelectionImportMessage("");
+    selectionImportInputRef.current?.click();
+  };
+  const handleSelectionImport = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+    try {
+      const parsed = JSON.parse(await file.text());
+      const mode = parsed?.mode === "watchlist" ? "watchlist" : "timeline";
+      const nextIds = sanitizeSelectionIds(parsed?.selectedMovieIds);
+      const nextTitles = sanitizeSelectionTitles(parsed?.selectedMovieTitles);
+      if (mode === "watchlist") {
+        setSelectedMovieTitles(nextTitles);
+        setSelectedMovieIds([]);
+        setActivePlanIndex(null);
+        setIsWatchlistMode(true);
+        setSelectionImportMessage(
+          `Imported watchlist (${nextTitles.length} film${nextTitles.length === 1 ? "" : "s"}).`,
+        );
+        return;
+      }
+      if (Array.isArray(parsed?.planVariants)) {
+        const parsedPlanVariants = Array.from(
+          { length: PLAN_COUNT },
+          (_, index) => {
+            const planIds = parsed.planVariants[index];
+            if (!Array.isArray(planIds)) return null;
+            const ids = sanitizeSelectionIds(planIds);
+            return ids.length ? ids : null;
+          },
+        );
+        const parsedActiveIndex = Number.isInteger(parsed?.activePlanIndex)
+          ? parsed.activePlanIndex
+          : null;
+        setPlanVariants(parsedPlanVariants);
+        setActivePlanIndex(
+          parsedActiveIndex !== null &&
+            parsedActiveIndex >= 0 &&
+            parsedActiveIndex < PLAN_COUNT &&
+            parsedPlanVariants[parsedActiveIndex]
+            ? parsedActiveIndex
+            : null,
+        );
+      } else {
+        setActivePlanIndex(null);
+      }
+      setSelectedMovieIds(nextIds);
+      setSelectedMovieTitles([]);
+      setIsWatchlistMode(false);
+      setSelectionImportMessage(
+        `Imported timeline selection (${nextIds.length} screening${nextIds.length === 1 ? "" : "s"}).`,
+      );
+    } catch (error) {
+      console.error("Failed to import selection:", error);
+      setSelectionImportMessage(
+        "Import failed. Please choose a valid selection JSON file.",
+      );
+    }
   };
 
   useEffect(() => {
@@ -1047,7 +996,27 @@ export default function App() {
                 >
                   Clear
                 </button>
+                <button
+                  type="button"
+                  onClick={promptSelectionImport}
+                  className="px-3 py-1.5 rounded-md text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 inline-flex items-center gap-1.5"
+                >
+                  <Upload className="w-4 h-4" />
+                  Import JSON
+                </button>
+                <input
+                  ref={selectionImportInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={handleSelectionImport}
+                  className="hidden"
+                />
               </div>
+              {selectionImportMessage && (
+                <p className="w-full text-xs text-gray-600">
+                  {selectionImportMessage}
+                </p>
+              )}
               {!isWatchlistMode && planVariants.some(Boolean) && (
                 <div className="w-full flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2">
                   <span className="text-xs font-semibold text-gray-600">
@@ -1064,13 +1033,6 @@ export default function App() {
                       {`Plan ${index + 1} (${plan?.length ?? "--"})`}
                     </button>
                   ))}
-                  <button
-                    type="button"
-                    onClick={downloadPlanVariants}
-                    className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200"
-                  >
-                    Download Plans
-                  </button>
                 </div>
               )}
             </div>
@@ -1142,21 +1104,39 @@ export default function App() {
                     className="mt-2 flex flex-wrap items-center gap-2"
                     data-html2canvas-ignore="true"
                   >
-                    {watchlistPlans.length === 0 && (
+                    {isWatchlistPlanning && (
+                      <span className="text-xs text-gray-500">
+                        Rebuilding plans...
+                      </span>
+                    )}
+                    {!isWatchlistPlanning && watchlistPlans.length === 0 && (
                       <span className="text-xs text-gray-500">
                         No feasible plan found yet.
                       </span>
                     )}
                     {watchlistPlansByIndex.map((plan, index) => (
-                      <button
+                      <div
                         key={`watchlist-plan-${index + 1}`}
-                        type="button"
-                        onClick={() => applyWatchlistPlan(index)}
-                        disabled={!plan}
-                        className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-stretch"
                       >
-                        {`Plan ${index + 1} (${plan?.length ?? "--"})`}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => applyWatchlistPlan(index)}
+                          disabled={isWatchlistPlanning || !plan}
+                          className="px-2.5 py-1.5 rounded-l-md text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {`Plan ${index + 1} (${plan?.length ?? "--"})`}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => exportWatchlistPlan(index)}
+                          disabled={isWatchlistPlanning || !plan}
+                          className="px-2.5 py-1.5 rounded-r-md text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          JSON
+                        </button>
+                      </div>
                     ))}
                     <button
                       type="button"
@@ -1173,6 +1153,14 @@ export default function App() {
                       className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportCurrentSelection}
+                      className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 inline-flex items-center gap-1"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Export
                     </button>
                   </div>
                 </div>
@@ -1201,17 +1189,25 @@ export default function App() {
                     >
                       PDF
                     </button>
+                    <button
+                      type="button"
+                      onClick={exportCurrentSelection}
+                      className="px-2.5 py-1.5 rounded-md text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 inline-flex items-center gap-1"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Export
+                    </button>
                   </div>
                 </div>
               )}
               {isWatchlistMode && (
                 <p className="mb-3 text-xs text-gray-600">
                   Pick Plan 1, Plan 2, or Plan 3 to exit Watchlist Mode and load
-                  that variant in the main schedule. Plans stay saved so you can
-                  switch between them, edit selections, and download all plan
-                  variants. Planning accounts for travel times (Maison to/from
-                  others: 60 min, others: 25 min), max two venues per day, and
-                  no return trip to the first venue after switching.
+                  that variant in the main schedule. Use each plan's JSON button
+                  to export it directly. Planning accounts for travel times
+                  (Maison to/from others: 60 min, others: 25 min), max two
+                  venues per day, and no return trip to the first venue after
+                  switching.
                 </p>
               )}
               <div
