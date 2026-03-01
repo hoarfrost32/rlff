@@ -1,4 +1,15 @@
 const DAYS = [1, 2, 3];
+const MIN_PRIORITY = 1;
+const MAX_PRIORITY = 3;
+
+const normalizePriority = (value) => {
+  const priority = Number(value);
+  return Number.isInteger(priority) &&
+    priority >= MIN_PRIORITY &&
+    priority <= MAX_PRIORITY
+    ? priority
+    : MIN_PRIORITY;
+};
 
 const isMaisonVenue = (venue = "") => venue.toUpperCase().includes("MAISON");
 
@@ -83,6 +94,7 @@ const toPlanScreening = (screening) => ({
   startMinutes: screening.startMinutes,
   endMinutes: screening.endMinutes,
   isTBC: Boolean(screening.isTBC),
+  priority: normalizePriority(screening.priority),
 });
 
 const normalizeFilms = (films) =>
@@ -90,6 +102,7 @@ const normalizeFilms = (films) =>
     ? films
         .map((film) => ({
           title: typeof film?.title === "string" ? film.title : "",
+          priority: normalizePriority(film?.priority),
           screenings: Array.isArray(film?.screenings)
             ? film.screenings
                 .map((screening) => ({
@@ -103,6 +116,7 @@ const normalizeFilms = (films) =>
                   startMinutes: screening?.startMinutes,
                   endMinutes: screening?.endMinutes,
                   isTBC: Boolean(screening?.isTBC),
+                  priority: normalizePriority(film?.priority),
                 }))
                 .filter(
                   (screening) =>
@@ -130,7 +144,12 @@ const buildGreedyWatchlistPlan = (candidates) => {
       if (!canAttendScreeningAfter(current, screening)) continue;
       const nextDayVenueState = applyDayVenueRule(dayVenueState, screening);
       if (!nextDayVenueState) continue;
-      if (!best || compareScreenings(screening, best) < 0) {
+      if (
+        !best ||
+        screening.priority > best.priority ||
+        (screening.priority === best.priority &&
+          compareScreenings(screening, best) < 0)
+      ) {
         best = screening;
         bestDayVenueState = nextDayVenueState;
       }
@@ -149,7 +168,11 @@ const buildBestWatchlistPlan = (films, excludedScreeningIds = new Set()) => {
   const titleCount = films.length;
   if (titleCount > 20) {
     const flattened = films.flatMap((film, titleIndex) =>
-      film.screenings.map((screening) => ({ ...screening, titleIndex })),
+      film.screenings.map((screening) => ({
+        ...screening,
+        titleIndex,
+        priority: normalizePriority(film.priority),
+      })),
     );
     return buildGreedyWatchlistPlan(
       flattened.filter((screening) => !excludedScreeningIds.has(screening.id)),
@@ -158,7 +181,11 @@ const buildBestWatchlistPlan = (films, excludedScreeningIds = new Set()) => {
 
   const screenings = films
     .flatMap((film, titleIndex) =>
-      film.screenings.map((screening) => ({ ...screening, titleIndex })),
+      film.screenings.map((screening) => ({
+        ...screening,
+        titleIndex,
+        priority: normalizePriority(film.priority),
+      })),
     )
     .filter((screening) => !excludedScreeningIds.has(screening.id))
     .sort(compareScreenings);
@@ -177,6 +204,7 @@ const buildBestWatchlistPlan = (films, excludedScreeningIds = new Set()) => {
     const memoKey = `${lastIndex}|${mask}|${encodeDayVenueState(dayVenueState)}`;
     if (memo.has(memoKey)) return memo.get(memoKey);
 
+    let bestPriority = 0;
     let bestCount = 0;
     let bestNextIndex = -1;
     const previous = lastIndex === -1 ? null : screenings[lastIndex];
@@ -190,17 +218,23 @@ const buildBestWatchlistPlan = (films, excludedScreeningIds = new Set()) => {
       if (!nextDayVenueState) continue;
 
       const candidate = solve(index, mask | bit, nextDayVenueState);
+      const screeningPriority = normalizePriority(screening.priority);
+      const candidatePriority = screeningPriority + candidate.bestPriority;
       const candidateCount = 1 + candidate.bestCount;
       if (
-        candidateCount > bestCount ||
-        (candidateCount === bestCount && pickBetter(index, bestNextIndex))
+        candidatePriority > bestPriority ||
+        (candidatePriority === bestPriority && candidateCount > bestCount) ||
+        (candidatePriority === bestPriority &&
+          candidateCount === bestCount &&
+          pickBetter(index, bestNextIndex))
       ) {
+        bestPriority = candidatePriority;
         bestCount = candidateCount;
         bestNextIndex = index;
       }
     }
 
-    const resolved = { bestCount, bestNextIndex };
+    const resolved = { bestPriority, bestCount, bestNextIndex };
     memo.set(memoKey, resolved);
     return resolved;
   };
@@ -271,7 +305,9 @@ self.addEventListener("message", (event) => {
     self.postMessage({
       requestId,
       error:
-        error instanceof Error ? error.message : "Unknown watchlist planner error",
+        error instanceof Error
+          ? error.message
+          : "Unknown watchlist planner error",
     });
   }
 });

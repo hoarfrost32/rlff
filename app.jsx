@@ -38,6 +38,23 @@ const DAY_BTN =
 const CARD_BASE = "p-4 rounded-xl border transition-all flex flex-col h-full";
 const TMDB_FETCH_DELAY_BASE_MS = 40;
 const TMDB_FETCH_DELAY_JITTER_MS = 120;
+const MIN_PRIORITY = 1;
+const MAX_PRIORITY = 3;
+const PRIORITY_LABELS = {
+  1: "Priority 1",
+  2: "Priority 2",
+  3: "Priority 3",
+};
+const PRIORITY_CARD_CLASSES = {
+  1: "bg-amber-50 border-amber-400 ring-2 ring-amber-200 shadow-md cursor-pointer",
+  2: "bg-orange-50 border-orange-400 ring-2 ring-orange-200 shadow-md cursor-pointer",
+  3: "bg-red-50 border-red-500 ring-2 ring-red-300 shadow-md cursor-pointer",
+};
+const PRIORITY_BADGE_CLASSES = {
+  1: "text-amber-800 bg-amber-100 border-amber-200",
+  2: "text-orange-800 bg-orange-100 border-orange-200",
+  3: "text-red-700 bg-red-100 border-red-200",
+};
 const makeDayGroups = () => ({ 1: [], 2: [], 3: [] });
 const groupByDay = (items) =>
   items.reduce(
@@ -66,8 +83,19 @@ const ordinalSuffix = (day) =>
         : day % 10 === 3
           ? "rd"
           : "th";
-const cardClass = (isSelected, isTBC, isDarkened) =>
-  `${CARD_BASE} ${isSelected ? "bg-red-50 border-red-400 ring-2 ring-red-300 shadow-md cursor-pointer" : isTBC ? "bg-gray-50 border-gray-200 cursor-default" : "bg-white border-gray-200 shadow-sm hover:shadow-md cursor-pointer"} ${isDarkened ? "opacity-35 grayscale" : ""}`;
+const cardClass = (
+  isSelected,
+  isTBC,
+  isDarkened,
+  priority = 0,
+  isWatchlistMode = false,
+) => {
+  const selectedClass =
+    isWatchlistMode && PRIORITY_CARD_CLASSES[priority]
+      ? PRIORITY_CARD_CLASSES[priority]
+      : "bg-red-50 border-red-400 ring-2 ring-red-300 shadow-md cursor-pointer";
+  return `${CARD_BASE} ${isSelected ? selectedClass : isTBC ? "bg-gray-50 border-gray-200 cursor-default" : "bg-white border-gray-200 shadow-sm hover:shadow-md cursor-pointer"} ${isDarkened ? "opacity-35 grayscale" : ""}`;
+};
 
 const parseTime = (timeStr) => {
   if (!timeStr) return 0;
@@ -102,6 +130,16 @@ const formatTimelineDayLabel = (dayLabel) => {
 };
 const dayLabelShort = (dayId) =>
   daysMap[dayId]?.split(",")[0] || `Day ${dayId}`;
+const getNextPriority = (currentPriority = 0) =>
+  currentPriority >= MAX_PRIORITY ? 0 : currentPriority + 1;
+const normalizePriority = (value) => {
+  const priority = Number(value);
+  return Number.isInteger(priority) &&
+    priority >= MIN_PRIORITY &&
+    priority <= MAX_PRIORITY
+    ? priority
+    : 0;
+};
 
 const areIdListsEqual = (a = [], b = []) =>
   a.length === b.length && a.every((id, index) => id === b[index]);
@@ -316,6 +354,8 @@ const WatchlistTimeline = ({ films }) => (
 const ScreeningCard = ({
   item,
   isSelected,
+  selectionPriority,
+  isWatchlistMode,
   isConflicting,
   onToggleSelection,
   onMouseEnter,
@@ -385,7 +425,13 @@ const ScreeningCard = ({
       }}
       onMouseEnter={() => onMouseEnter(id)}
       onMouseLeave={() => onMouseLeave(id)}
-      className={cardClass(isSelected, isTBC, isDarkened)}
+      className={cardClass(
+        isSelected,
+        isTBC,
+        isDarkened,
+        selectionPriority,
+        isWatchlistMode,
+      )}
     >
       <div className="flex gap-4 mb-3">
         <MoviePoster title={title} details={details} isTBC={isTBC} />
@@ -413,8 +459,16 @@ const ScreeningCard = ({
             </p>
           )}
           {isSelected && (
-            <span className="inline-flex items-center mb-2 text-[11px] font-bold text-red-700 bg-red-100 border border-red-200 rounded px-2 py-0.5">
-              Selected
+            <span
+              className={`inline-flex items-center mb-2 text-[11px] font-bold border rounded px-2 py-0.5 ${
+                isWatchlistMode && PRIORITY_BADGE_CLASSES[selectionPriority]
+                  ? PRIORITY_BADGE_CLASSES[selectionPriority]
+                  : "text-red-700 bg-red-100 border-red-200"
+              }`}
+            >
+              {isWatchlistMode
+                ? PRIORITY_LABELS[selectionPriority] || "Priority"
+                : "Selected"}
             </span>
           )}
           {details && (
@@ -458,7 +512,7 @@ export default function App() {
   const [selectedVenue, setSelectedVenue] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMovieIds, setSelectedMovieIds] = useState([]);
-  const [selectedMovieTitles, setSelectedMovieTitles] = useState([]);
+  const [selectedMoviePriorities, setSelectedMoviePriorities] = useState({});
   const [planVariants, setPlanVariants] = useState(() =>
     Array.from({ length: PLAN_COUNT }, () => null),
   );
@@ -513,6 +567,13 @@ export default function App() {
       ),
     [allScheduleItems],
   );
+  const selectedMovieTitles = useMemo(
+    () =>
+      Object.keys(selectedMoviePriorities).filter(
+        (title) => normalizePriority(selectedMoviePriorities[title]) > 0,
+      ),
+    [selectedMoviePriorities],
+  );
   const selectedTitleSet = useMemo(
     () => new Set(selectedMovieTitles),
     [selectedMovieTitles],
@@ -529,11 +590,17 @@ export default function App() {
     const byTitle = new Map();
     for (const item of allScheduleItems) {
       if (!selectedTitleSet.has(item.title) || item.isTBC) continue;
+      const priority = normalizePriority(selectedMoviePriorities[item.title]);
+      if (!priority) continue;
       const current = byTitle.get(item.title);
       if (current) {
         current.screenings.push(item);
       } else {
-        byTitle.set(item.title, { title: item.title, screenings: [item] });
+        byTitle.set(item.title, {
+          title: item.title,
+          priority,
+          screenings: [item],
+        });
       }
     }
     return Array.from(byTitle.values())
@@ -552,7 +619,7 @@ export default function App() {
           a.title.localeCompare(b.title)
         );
       });
-  }, [allScheduleItems, selectedTitleSet]);
+  }, [allScheduleItems, selectedMoviePriorities, selectedTitleSet]);
   useEffect(() => {
     watchlistPlanRequestIdRef.current += 1;
     const requestId = watchlistPlanRequestIdRef.current;
@@ -657,11 +724,16 @@ export default function App() {
   const handleToggleSelection = (item) => {
     if (item.isTBC) return;
     if (isWatchlistMode) {
-      setSelectedMovieTitles((prev) =>
-        prev.includes(item.title)
-          ? prev.filter((title) => title !== item.title)
-          : [...prev, item.title],
-      );
+      setSelectedMoviePriorities((prev) => {
+        const currentPriority = normalizePriority(prev[item.title]);
+        const nextPriority = getNextPriority(currentPriority);
+        if (!nextPriority) {
+          if (!currentPriority) return prev;
+          const { [item.title]: _removed, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, [item.title]: nextPriority };
+      });
       return;
     }
     setSelectedMovieIds((prev) =>
@@ -726,18 +798,37 @@ export default function App() {
           ),
         )
       : [];
+  const sanitizeSelectionPriorities = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const sanitized = {};
+    for (const [title, priorityValue] of Object.entries(value)) {
+      if (!allSelectableTitleSet.has(title)) continue;
+      const priority = normalizePriority(priorityValue);
+      if (!priority) continue;
+      sanitized[title] = priority;
+    }
+    return sanitized;
+  };
   const downloadSelectionJson = ({
     mode,
     selectedIds = [],
     selectedTitles = [],
+    selectedPriorities = {},
     fileName = "rlff-selection.json",
   }) => {
+    const sanitizedTitles = sanitizeSelectionTitles(selectedTitles);
+    const sanitizedPriorities = sanitizeSelectionPriorities(selectedPriorities);
+    const titlesFromPriorities = Object.keys(sanitizedPriorities);
+    const normalizedTitles = Array.from(
+      new Set([...sanitizedTitles, ...titlesFromPriorities]),
+    );
     const payload = {
       exportedAt: new Date().toISOString(),
       type: "rlff-selection",
       mode,
       selectedMovieIds: sanitizeSelectionIds(selectedIds),
-      selectedMovieTitles: sanitizeSelectionTitles(selectedTitles),
+      selectedMovieTitles: normalizedTitles,
+      selectedMoviePriorities: sanitizedPriorities,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -754,6 +845,7 @@ export default function App() {
       downloadSelectionJson({
         mode: "watchlist",
         selectedTitles: selectedMovieTitles,
+        selectedPriorities: selectedMoviePriorities,
         fileName: "rlff-watchlist-selection.json",
       });
       return;
@@ -787,13 +879,20 @@ export default function App() {
       const mode = parsed?.mode === "watchlist" ? "watchlist" : "timeline";
       const nextIds = sanitizeSelectionIds(parsed?.selectedMovieIds);
       const nextTitles = sanitizeSelectionTitles(parsed?.selectedMovieTitles);
+      const parsedPriorities = sanitizeSelectionPriorities(
+        parsed?.selectedMoviePriorities,
+      );
       if (mode === "watchlist") {
-        setSelectedMovieTitles(nextTitles);
+        const nextPriorities = { ...parsedPriorities };
+        for (const title of nextTitles) {
+          if (!nextPriorities[title]) nextPriorities[title] = MIN_PRIORITY;
+        }
+        setSelectedMoviePriorities(nextPriorities);
         setSelectedMovieIds([]);
         setActivePlanIndex(null);
         setIsWatchlistMode(true);
         setSelectionImportMessage(
-          `Imported watchlist (${nextTitles.length} film${nextTitles.length === 1 ? "" : "s"}).`,
+          `Imported watchlist (${Object.keys(nextPriorities).length} film${Object.keys(nextPriorities).length === 1 ? "" : "s"}).`,
         );
         return;
       }
@@ -823,7 +922,7 @@ export default function App() {
         setActivePlanIndex(null);
       }
       setSelectedMovieIds(nextIds);
-      setSelectedMovieTitles([]);
+      setSelectedMoviePriorities({});
       setIsWatchlistMode(false);
       setSelectionImportMessage(
         `Imported timeline selection (${nextIds.length} screening${nextIds.length === 1 ? "" : "s"}).`,
@@ -988,7 +1087,7 @@ export default function App() {
                   type="button"
                   onClick={() =>
                     isWatchlistMode
-                      ? setSelectedMovieTitles([])
+                      ? setSelectedMoviePriorities({})
                       : setSelectedMovieIds([])
                   }
                   disabled={!hasSelections}
@@ -1069,6 +1168,14 @@ export default function App() {
                                 ? selectedTitleSet.has(item.title)
                                 : selectedIdSet.has(item.id)
                             }
+                            selectionPriority={
+                              isWatchlistMode
+                                ? normalizePriority(
+                                    selectedMoviePriorities[item.title],
+                                  )
+                                : 0
+                            }
+                            isWatchlistMode={isWatchlistMode}
                             isConflicting={
                               isWatchlistMode
                                 ? false
@@ -1202,6 +1309,9 @@ export default function App() {
               )}
               {isWatchlistMode && (
                 <p className="mb-3 text-xs text-gray-600">
+                  Click a film card to cycle priority: Priority 1, Priority 2,
+                  Priority 3, then deselect.
+                  <br />
                   Pick Plan 1, Plan 2, or Plan 3 to exit Watchlist Mode and load
                   that variant in the main schedule. Use each plan's JSON button
                   to export it directly. Planning accounts for travel times
