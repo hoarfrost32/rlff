@@ -68,7 +68,7 @@ export const rawScheduleData = [
   [1, "PVR JUHU", "2", "3:45 PM", "FURCY", "French, Drama, 108 min"],
   [1, "PVR JUHU", "2", "6:05 PM", "THE LOVE THAT REMAINS", "Icelandic, Drama, 109 min"],
   [1, "PVR JUHU", "2", "8:25 PM", "SAFE HOUSE", "Norwegian, Thriller, 94 min"],
-  [1, "PVR JUHU", "2", "10:30 PM", "OLD BOY", "Korean, Thriller, 120 min"],
+  [1, "PVR JUHU", "2", "10:30 PM", "OLDBOY", "Korean, Thriller, 120 min"],
 
   // SATURDAY
   [2, "INOX MAISON", "1", "12:00 PM", "FIGHTER", "Norwegian, Documentary, 83 min"],
@@ -173,7 +173,7 @@ export const rawScheduleData = [
   [3, "INOX MAISON", "5", "5:40 PM", "VICKY CRISTINA BARCELONA", "English, Romance, 96 min"],
   [3, "INOX MAISON", "5", "7:45 PM", "ZIMMEDARI UMEED AZADI SANDYEEP (ZUAS)", "Hindi, Thriller, 110 min"],
   [3, "INOX MAISON", "6", "10:40 AM", "BARSAAT KI RAAT", "Hindi, Drama, 142 min"],
-  [3, "INOX MAISON", "6", "1:30 PM", "OLD BOY", "Korean, Thriller, 120 min"],
+  [3, "INOX MAISON", "6", "1:30 PM", "OLDBOY", "Korean, Thriller, 120 min"],
   [3, "INOX MAISON", "6", "4:00 PM", "TOH TI ANI FUJI", "Marathi, Romance, 135 min, Meet with Cast and Crew"],
   [3, "INOX MAISON", "6", "8:00 PM", "13 DAYS 13 NIGHTS", "French, Thriller, 112 min, Closing Film"],
   [3, "PVR ICON", "1", "12:00 PM", "CASE 137", "French, Thriller, 115 min"],
@@ -194,7 +194,7 @@ export const rawScheduleData = [
   [3, "PVR CITI MALL", "1", "10:30 PM", "SON OF SARA: VOLUME 1", "English, Horror, 85 min"],
   [3, "CINÉPOLIS", "3", "10:20 AM", "LEAVE ONE DAY", "French, Romance, 98 min"],
   [3, "CINÉPOLIS", "3", "12:35 PM", "PROJECT Y", "Korean, Crime, 110 min"],
-  [3, "CINÉPOLIS", "3", "2:35 PM", "OLD BOY", "Korean, Thriller, 120 min"],
+  [3, "CINÉPOLIS", "3", "2:35 PM", "OLDBOY", "Korean, Thriller, 120 min"],
   [3, "CINÉPOLIS", "3", "5:05 PM", "IS THIS THING ON?", "English, Drama, 124 min"],
   [3, "CINÉPOLIS", "3", "7:40 PM", "LONG STORY SHORT", "German, Dramedy, 107 min"],
   [3, "CINÉPOLIS", "3", "10:00 PM", "OUR HERO, BALTHAZAR", "English, Comedy Drama, 91 min"],
