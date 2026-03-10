@@ -6,42 +6,29 @@ const trailerCache = {};
 const letterboxdCache = {};
 const originalTitleCache = {};
 const lookupInflight = {};
-const NOT_FOUND = "not_found";
 
 const getCacheKey = (title, details = "") => `${title}__${details}`;
-const isUsableCacheValue = (value) =>
-  value !== undefined && value !== null && value !== NOT_FOUND;
 
 export const getCachedPosterUrl = (title, details = "") =>
-  isUsableCacheValue(posterCache[getCacheKey(title, details)])
-    ? posterCache[getCacheKey(title, details)]
-    : null;
+  posterCache[getCacheKey(title, details)] || null;
 
 export const getCachedMovieOverview = (title, details = "") =>
-  isUsableCacheValue(overviewCache[getCacheKey(title, details)])
-    ? overviewCache[getCacheKey(title, details)]
-    : null;
+  overviewCache[getCacheKey(title, details)] || null;
 export const getCachedTrailerUrl = (title, details = "") =>
-  isUsableCacheValue(trailerCache[getCacheKey(title, details)])
-    ? trailerCache[getCacheKey(title, details)]
-    : null;
+  trailerCache[getCacheKey(title, details)] || null;
 export const getCachedLetterboxdUrl = (title, details = "") =>
-  isUsableCacheValue(letterboxdCache[getCacheKey(title, details)])
-    ? letterboxdCache[getCacheKey(title, details)]
-    : null;
+  letterboxdCache[getCacheKey(title, details)] || null;
 export const getCachedOriginalTitle = (title, details = "") =>
-  isUsableCacheValue(originalTitleCache[getCacheKey(title, details)])
-    ? originalTitleCache[getCacheKey(title, details)]
-    : null;
+  originalTitleCache[getCacheKey(title, details)] || null;
 
 const deriveLetterboxdUrl = ({ tmdbId }) =>
   tmdbId ? `https://letterboxd.com/tmdb/${tmdbId}` : "not_found";
 
 const mapRecordData = (data) => ({
-  posterUrl: data?.posterUrl || NOT_FOUND,
-  overview: data?.overview || NOT_FOUND,
-  trailerUrl: data?.trailerUrl || NOT_FOUND,
-  originalTitle: data?.originalTitle || NOT_FOUND,
+  posterUrl: data?.posterUrl || "not_found",
+  overview: data?.overview || "not_found",
+  trailerUrl: data?.trailerUrl || "not_found",
+  originalTitle: data?.originalTitle || "not_found",
   letterboxdUrl: deriveLetterboxdUrl({
     tmdbId: data?.tmdbId,
   }),
@@ -71,11 +58,11 @@ const fetchTmdbRecordViaLocalDevToken = async ({ title, details = "" }) => {
 };
 
 const isHardNotFoundRecord = (record) =>
-  record?.posterUrl === NOT_FOUND &&
-  record?.overview === NOT_FOUND &&
-  record?.trailerUrl === NOT_FOUND &&
-  record?.originalTitle === NOT_FOUND &&
-  record?.letterboxdUrl === NOT_FOUND;
+  record?.posterUrl === "not_found" &&
+  record?.overview === "not_found" &&
+  record?.trailerUrl === "not_found" &&
+  record?.originalTitle === "not_found" &&
+  record?.letterboxdUrl === "not_found";
 
 const hasLocalDevTmdbToken = () =>
   Boolean(import.meta.env.DEV && import.meta.env?.VITE_TMDB_READ_ACCESS_TOKEN);
@@ -106,7 +93,7 @@ const resolveTmdbRecord = async ({ title, details = "" }) => {
 
 export const fetchPosterUrl = async ({ title, details = "" }) => {
   const cacheKey = getCacheKey(title, details);
-  if (isUsableCacheValue(posterCache[cacheKey])) return posterCache[cacheKey];
+  if (posterCache[cacheKey]) return posterCache[cacheKey];
 
   try {
     const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
@@ -122,19 +109,18 @@ export const fetchPosterUrl = async ({ title, details = "" }) => {
     return posterUrl;
   } catch (error) {
     console.error("Failed to fetch poster for", title, error.message);
-    posterCache[cacheKey] = NOT_FOUND;
-    overviewCache[cacheKey] = NOT_FOUND;
-    trailerCache[cacheKey] = NOT_FOUND;
-    letterboxdCache[cacheKey] = NOT_FOUND;
-    originalTitleCache[cacheKey] = NOT_FOUND;
-    return NOT_FOUND;
+    posterCache[cacheKey] = "not_found";
+    overviewCache[cacheKey] = "not_found";
+    trailerCache[cacheKey] = "not_found";
+    letterboxdCache[cacheKey] = "not_found";
+    originalTitleCache[cacheKey] = "not_found";
+    return "not_found";
   }
 };
 
 export const fetchMovieOverview = async ({ title, details = "" }) => {
   const cacheKey = getCacheKey(title, details);
-  if (isUsableCacheValue(overviewCache[cacheKey]))
-    return overviewCache[cacheKey];
+  if (overviewCache[cacheKey]) return overviewCache[cacheKey];
 
   try {
     const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
@@ -151,14 +137,14 @@ export const fetchMovieOverview = async ({ title, details = "" }) => {
     return overview;
   } catch (error) {
     console.error("Failed to fetch overview for", title, error.message);
-    overviewCache[cacheKey] = NOT_FOUND;
-    return NOT_FOUND;
+    overviewCache[cacheKey] = "not_found";
+    return "not_found";
   }
 };
 
 export const fetchTrailerUrl = async ({ title, details = "" }) => {
   const cacheKey = getCacheKey(title, details);
-  if (isUsableCacheValue(trailerCache[cacheKey])) return trailerCache[cacheKey];
+  if (trailerCache[cacheKey]) return trailerCache[cacheKey];
 
   try {
     const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
@@ -175,15 +161,14 @@ export const fetchTrailerUrl = async ({ title, details = "" }) => {
     return trailerUrl;
   } catch (error) {
     console.error("Failed to fetch trailer for", title, error.message);
-    trailerCache[cacheKey] = NOT_FOUND;
-    return NOT_FOUND;
+    trailerCache[cacheKey] = "not_found";
+    return "not_found";
   }
 };
 
 export const fetchLetterboxdUrl = async ({ title, details = "" }) => {
   const cacheKey = getCacheKey(title, details);
-  if (isUsableCacheValue(letterboxdCache[cacheKey]))
-    return letterboxdCache[cacheKey];
+  if (letterboxdCache[cacheKey]) return letterboxdCache[cacheKey];
 
   try {
     const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
@@ -200,15 +185,14 @@ export const fetchLetterboxdUrl = async ({ title, details = "" }) => {
     return letterboxdUrl;
   } catch (error) {
     console.error("Failed to fetch letterboxd URL for", title, error.message);
-    letterboxdCache[cacheKey] = NOT_FOUND;
-    return NOT_FOUND;
+    letterboxdCache[cacheKey] = "not_found";
+    return "not_found";
   }
 };
 
 export const fetchOriginalTitle = async ({ title, details = "" }) => {
   const cacheKey = getCacheKey(title, details);
-  if (isUsableCacheValue(originalTitleCache[cacheKey]))
-    return originalTitleCache[cacheKey];
+  if (originalTitleCache[cacheKey]) return originalTitleCache[cacheKey];
 
   try {
     const { posterUrl, overview, trailerUrl, letterboxdUrl, originalTitle } =
@@ -224,7 +208,7 @@ export const fetchOriginalTitle = async ({ title, details = "" }) => {
     return originalTitle;
   } catch (error) {
     console.error("Failed to fetch original title for", title, error.message);
-    originalTitleCache[cacheKey] = NOT_FOUND;
-    return NOT_FOUND;
+    originalTitleCache[cacheKey] = "not_found";
+    return "not_found";
   }
 };
