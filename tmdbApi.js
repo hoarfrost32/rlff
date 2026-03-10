@@ -64,20 +64,20 @@ const isHardNotFoundRecord = (record) =>
   record?.originalTitle === "not_found" &&
   record?.letterboxdUrl === "not_found";
 
+const hasLocalDevTmdbToken = () =>
+  Boolean(import.meta.env.DEV && import.meta.env?.VITE_TMDB_READ_ACCESS_TOKEN);
+
 const fetchTmdbRecord = async ({ title, details = "" }) => {
-  try {
-    const apiRecord = await fetchTmdbRecordViaApi({ title, details });
-    if (!isHardNotFoundRecord(apiRecord)) return apiRecord;
-    if (!import.meta.env.DEV || !import.meta.env?.VITE_TMDB_READ_ACCESS_TOKEN) {
-      return apiRecord;
-    }
-    return await fetchTmdbRecordViaLocalDevToken({ title, details });
-  } catch (error) {
-    if (!import.meta.env.DEV || !import.meta.env?.VITE_TMDB_READ_ACCESS_TOKEN) {
-      throw error;
-    }
+  if (hasLocalDevTmdbToken()) {
     return await fetchTmdbRecordViaLocalDevToken({ title, details });
   }
+
+  const apiRecord = await fetchTmdbRecordViaApi({ title, details });
+  if (!isHardNotFoundRecord(apiRecord)) return apiRecord;
+  if (hasLocalDevTmdbToken()) {
+    return await fetchTmdbRecordViaLocalDevToken({ title, details });
+  }
+  return apiRecord;
 };
 
 const resolveTmdbRecord = async ({ title, details = "" }) => {
