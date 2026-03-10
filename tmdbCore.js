@@ -19,6 +19,7 @@ const LANGUAGE_TO_ISO = {
   greek: "el",
   dutch: "nl",
   icelandic: "is",
+  italian: "it",
   russian: "ru",
   arabic: "ar",
   flemish: "nl",
@@ -60,6 +61,7 @@ const ORIGINAL_TITLE_HINTS = {
   [normalize("HEN")]: "Κότα",
   [normalize("THE REDEMPTION")]: "La deuda",
   [normalize("RESURRECTION")]: "Kuangye shidai",
+  [normalize("ISOLA")]: "Isola",
 };
 
 const DIRECTOR_HINTS = {
@@ -67,6 +69,15 @@ const DIRECTOR_HINTS = {
   [normalize("THE MERMAID")]: "Tyler Cornack",
   [normalize("MERMAID")]: "Tyler Cornack",
   [normalize("COLORS OF TIME")]: "Cédric Klapisch",
+  [normalize("ISOLA")]: "Nora Jaenicke",
+};
+
+const RELEASE_YEAR_HINTS = {
+  [normalize("ISOLA")]: 2025,
+};
+
+const LANGUAGE_HINTS = {
+  [normalize("ISOLA")]: "italian",
 };
 
 const tokenize = (value) =>
@@ -93,12 +104,18 @@ const parseDetailsMetadata = (details = "") => {
     .filter(Boolean);
   let languageLabel = null;
   let languageIso = null;
+  let releaseYear = null;
   for (const chunk of chunks) {
     const iso = LANGUAGE_TO_ISO[chunk];
-    if (!iso) continue;
-    languageLabel = chunk;
-    languageIso = iso;
-    break;
+    if (iso) {
+      languageLabel = chunk;
+      languageIso = iso;
+    }
+    if (!releaseYear) {
+      const yearMatch = chunk.match(/\b(18|19|20)\d{2}\b/);
+      if (yearMatch) releaseYear = Number(yearMatch[0]);
+    }
+    if (languageIso && releaseYear) break;
   }
 
   const genreIds = new Set();
@@ -107,13 +124,17 @@ const parseDetailsMetadata = (details = "") => {
       if (chunk.includes(genreLabel)) genreIds.add(genreId);
     }
   }
-  return { languageIso, languageLabel, genreIds };
+  return { languageIso, languageLabel, releaseYear, genreIds };
 };
 
 const getOriginalTitleHint = (title) =>
   ORIGINAL_TITLE_HINTS[normalize(cleanMovieTitle(title))] || null;
 const getDirectorHint = (title) =>
   DIRECTOR_HINTS[normalize(cleanMovieTitle(title))] || null;
+const getReleaseYearHint = (title) =>
+  RELEASE_YEAR_HINTS[normalize(cleanMovieTitle(title))] || null;
+const getLanguageHint = (title) =>
+  LANGUAGE_HINTS[normalize(cleanMovieTitle(title))] || null;
 
 const buildQueryCandidates = (
   title,
@@ -126,20 +147,32 @@ const buildQueryCandidates = (
   const withLanguage = metadata.languageLabel
     ? `${full} ${metadata.languageLabel}`
     : "";
+  const withYear = metadata.releaseYear ? `${full} ${metadata.releaseYear}` : "";
   const titleForDirector = originalTitleHint || full;
   const withDirector = directorHint
     ? `${titleForDirector} ${directorHint}`
     : "";
+  const withDirectorAndYear =
+    directorHint && metadata.releaseYear
+      ? `${titleForDirector} ${directorHint} ${metadata.releaseYear}`
+      : "";
   const hintWithLanguage =
     metadata.languageLabel && originalTitleHint
       ? `${originalTitleHint} ${metadata.languageLabel}`
       : "";
+  const hintWithYear =
+    metadata.releaseYear && originalTitleHint
+      ? `${originalTitleHint} ${metadata.releaseYear}`
+      : "";
   return Array.from(
     new Set(
       [
+        hintWithYear,
+        withDirectorAndYear,
         originalTitleHint,
         withDirector,
         hintWithLanguage,
+        withYear,
         full,
         withLanguage,
         withoutLeadingArticle,
@@ -147,12 +180,23 @@ const buildQueryCandidates = (
         full.split(",")[0].trim(),
       ].filter(Boolean),
     ),
-  ).slice(0, 3);
+  ).slice(0, 4);
 };
 
 const buildTmdbSearchRequests = ({ title, details = "" }) => {
   const cleanedTitle = cleanMovieTitle(title);
-  const metadata = parseDetailsMetadata(details);
+  const detailsMetadata = parseDetailsMetadata(details);
+  const languageHintLabel = getLanguageHint(title);
+  const languageHintIso = languageHintLabel
+    ? LANGUAGE_TO_ISO[languageHintLabel] || null
+    : null;
+  const releaseYearHint = getReleaseYearHint(title);
+  const metadata = {
+    ...detailsMetadata,
+    languageLabel: detailsMetadata.languageLabel || languageHintLabel,
+    languageIso: detailsMetadata.languageIso || languageHintIso,
+    releaseYear: detailsMetadata.releaseYear || releaseYearHint,
+  };
   const originalTitleHint = getOriginalTitleHint(title);
   const directorHint = getDirectorHint(title);
   const preferredTitle = originalTitleHint || cleanedTitle;
@@ -161,10 +205,20 @@ const buildTmdbSearchRequests = ({ title, details = "" }) => {
     metadata,
     originalTitleHint,
     directorHint,
-  ).map((query) => ({
-    query,
-    url: `https://api.themoviedb.org/3/search/movie?${new URLSearchParams({ query, include_adult: "false", page: "1" }).toString()}`,
-  }));
+  ).map((query) => {
+    const searchParams = {
+      query,
+      include_adult: "false",
+      page: "1",
+    };
+    if (metadata.releaseYear) {
+      searchParams.year = String(metadata.releaseYear);
+    }
+    return {
+      query,
+      url: `https://api.themoviedb.org/3/search/movie?${new URLSearchParams(searchParams).toString()}`,
+    };
+  });
   return {
     cleanedTitle,
     preferredTitle,
@@ -202,13 +256,21 @@ const scoreMovieCandidate = (movie, normalizedTitle, metadata) => {
       ) * 60;
   }
 
+  const releaseYear = Number.parseInt((movie.release_date || "").slice(0, 4), 10);
+
   if (metadata.languageIso) {
     if (movie.original_language !== metadata.languageIso)
       return Number.NEGATIVE_INFINITY;
   }
+  if (metadata.releaseYear) {
+    if (!Number.isFinite(releaseYear) || releaseYear !== metadata.releaseYear) {
+      return Number.NEGATIVE_INFINITY;
+    }
+  }
   if (titleScore < MIN_ACCEPTED_SCORE) return Number.NEGATIVE_INFINITY;
 
-  let score = titleScore + (metadata.languageIso ? 1000 : 0);
+  let score =
+    titleScore + (metadata.languageIso ? 1000 : 0) + (metadata.releaseYear ? 300 : 0);
   if (Array.isArray(movie.genre_ids) && metadata.genreIds.size) {
     let overlap = 0;
     for (const genreId of movie.genre_ids)
